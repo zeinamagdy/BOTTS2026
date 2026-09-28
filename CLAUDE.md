@@ -27,6 +27,9 @@ npm run db:push          # sync src/db/schema.ts -> DB (no migration files). Add
 npm run data:fetch       # clone/update the data repo into data/tech-battle (git-ignored)
 npm run db:seed          # wipes + reloads all tables from the CSVs (~1 min, ~500k rows)
 npm run db:setup         # data:fetch + db:push --force + db:seed (fresh machine)
+npm run data:osm         # re-fetch OSM green/water/parks/cafés → data/derived/osm-amenities.json (slow, Overpass is often busy)
+npm run data:photos      # re-fetch Wikimedia Commons photos → data/derived/kiez-photos.json
+npm run db:enrich        # reload only kiez_enrichment from data/derived/*.json (seconds)
 npm run db:studio        # Drizzle Studio
 npm run db:generate / db:migrate   # versioned migrations, once deployed
 ```
@@ -36,7 +39,13 @@ Env lives in `.env.local` (git-ignored; `.env.example` is committed): `DATABASE_
 ## Layout
 
 ```
-src/app/page.tsx                  placeholder dashboard (server component; tabs: Overview / Kiez map / AI Assistant)
+src/app/page.tsx                  landing page from Figma (node 19:270): nav, hero, How it works, Hidden Gems
+src/app/explore/page.tsx          old placeholder dashboard (Overview / Kiez map / AI Assistant); "Find my Kiez →" CTAs point here until the finder exists
+src/components/home/              landing sections (site-nav, hero, torn-edge, how-it-works, hidden-gems, find-kiez-button)
+public/home/                      Figma image exports (hero.jpg is only 1024 px wide, ask the designer for full res)
+src/lib/bvg.ts                    BVG HAFAS REST client (v6.bvg.transport.rest, no key), null on failure
+data/derived/                     OUR derived JSON (OSM, Wikimedia), committed; `.cache/` inside is ignored
+scripts/fetch-osm.mjs / fetch-photos.mjs   produce data/derived/*.json
 src/app/api/chat/route.ts         POST, OpenAI tool-calling loop, streams NDJSON events
 src/components/ui/                shadcn components (generated; ok to edit)
 src/components/dashboard/         kpi-cards, rent-chart, kiez-map(+ -lazy), district-table, assistant-chat
@@ -84,6 +93,7 @@ data/tech-battle/                 cloned data repo (git-ignored, never commit it
   | `transit_stations` | 135 | real names | only 7 lines (see below) |
   | `real_listings_2023` | 4,932 | real | immowelt sale listings, 10 non-Berlin zipcodes dropped, junk years/floors nulled |
   | `crime_stats` | 1,200 | real | per Bezirksregion, 2012–2019 |
+| `kiez_enrichment` | 193 | real (OSM / Commons) | ours, from `data/derived/`: green/water share, parks, cafés, playgrounds within 1 km of the PLZ centroid; one photo per PLZ (185/193) with author + license |
 
 - **Real vs synthetic:** all listings and price trends are synthetic, with € levels ~25–40% below the real market. Use them for relative comparison. `buyPricePerM2Real` (2023) is the real price signal.
 - **Derived in the seed (not in the CSVs):**
@@ -97,6 +107,10 @@ data/tech-battle/                 cloned data repo (git-ignored, never commit it
   - `transit_stations` covers only **U1, U2, U7, U8, S1, Stadtbahn, S Ringbahn**. No U5, U6, U9, most S-Bahn. The VBB GTFS stops would fix this.
   - Crime and Abitur tiers are **Bezirk-level**: every PLZ in a Bezirk shares the value. Crime is the sum of 15 categories and **absolute counts, not per capita**, so big Bezirke look worse. Rows named "… nicht zuzuordnen" are excluded.
   - Air quality is from the nearest of 15 stations, Feb 2026 only. CO/O₃ are missing for most PLZs.
+- **OSM enrichment** is measured in a 1 km circle around the PLZ centroid, which sits where people live, not in the middle of the PLZ. So Nikolassee (14129) scores only 11% green although Grunewald is next door: it measures what's reachable from home, not land area. Forest relations are assembled from outer rings (holes ignored).
+- The Ring polygon is built from our 24 "S Ringbahn" stations plus 4 the CSV lacks (Westend, Messe Nord, Wedding, Bornholmer Str.), hard-coded in `MISSING_RING_STATIONS` in `queries.ts`. 61 PLZs are inside, 132 outside. Drop the constant once the stations come from VBB GTFS.
+- Some Wikimedia photos are dull (garages, station signs). Hand-pick photos for the PLZs shown in the pitch.
+- PLZs 15537/15566/15569 are tiny Berlin border slivers (1–9 addresses), skipped by the ranking.
 
 ## Query API (`src/lib/queries.ts`)
 
@@ -106,8 +120,10 @@ All take plain objects. Filter fields may be `null` or missing, and both mean "n
 |---|---|
 | `getOverview()` | city-wide KPIs (counts, median warm rent, avg €/m²) |
 | `getBezirkSummary()` | per-Bezirk rent, real buy price, kita places, Abitur tier, crime |
-| `getKiezProfiles()` | all 193 PLZ rows (map, lists) |
-| `rankKiez({ weights, bezirke, maxRentPerM2, minAbiturTier, maxTransitKm, apartment, limit })` | **the core "find my Kiez" feature.** Weights 0–5 for affordability, schools, safety, air, kitas, transit, locationQuality. Each factor is scored as a percentile rank across Berlin, so ties (Bezirk-level values) score equally and missing values count 0.5. PLZs with <100 addresses are skipped. `apartment` keeps only PLZs with matching rentals and returns their count and median warm rent. |
+| `getKiezProfiles()` | all 193 PLZ rows (map, lists), left-joined with `kiez_enrichment`, plus `insideRing` (point-in-polygon vs the S-Ringbahn stations) |
+| `getHomeHighlights()` | landing page: top 3 family Kieze outside the Ring (min Abitur tier OK) with photos, plus counts |
+| `getCommute({ to, plzs, departAt })` | door-to-door ÖPNV minutes from ≤10 PLZ centroids to a place, next weekday 08:00 via BVG. If the API is down, geocodes locally (address → station → street) and returns `estimated: true` |
+| `rankKiez({ weights, bezirke, maxRentPerM2, minAbiturTier, maxTransitKm, apartment, limit })` | **the core "find my Kiez" feature.** Weights 0–5 for affordability, schools, safety, air, kitas, transit, locationQuality, nature (green share + ½ water share), amenities (cafés + playgrounds). `outsideRing` true/false filters by the S-Bahn Ring. Each factor is scored as a percentile rank across Berlin, so ties (Bezirk-level values) score equally and missing values count 0.5. PLZs with <100 addresses are skipped. `apartment` keeps only PLZs with matching rentals and returns their count and median warm rent. |
 | `getKiezDetail(plz)` | PLZ detail page: full profile, rent by room count, top schools in the Bezirk, largest kitas, 3 nearest stations, real 2023 sale prices |
 | `searchRentals(filters)` / `searchSales({ kind: "resale" \| "new_build", … })` | listing search: bezirke, plz, ortsteil, rooms, area, price, balcony, wohnlage, `near {lat, lon, radiusKm}`, `transitLines` + `maxStationKm` (default 1 km), sort. Returns total, median and rows with `nearestStation` |
 | `lookupAddress(street, houseNumber?)` | official Wohnlage per address. Tolerates "Str."/"strasse" and spaces vs hyphens ("Karl Marx Allee"), and suggests spellings via trigram similarity |
@@ -135,6 +151,8 @@ Test queries without the browser: write a `.mts` script (top-level await) that l
   4. Add a label and icon in `TOOL_META` in `assistant-chat.tsx`.
 - Seeing the tool rows is useful for debugging: when the model makes many calls for one question (6 rental searches for "near the U8"), a filter is missing.
 - For structured JSON use `openai.responses.parse` with `zodTextFormat` (from `openai/helpers/zod`).
+- **Hosted web search:** `tools.ts` appends OpenAI's `{ type: "web_search" }`. OpenAI runs it inside the response (no function_call round). `route.ts` turns each `web_search_call` output item into a `tool_call` + `tool_result` event (name `web_search`, args `{ query, sources }`) and requests `include: ["web_search_call.action.sources"]`. The system prompt limits the web to what the DB can't answer (flat size norms, Brandenburg) and requires citing it.
+- **BVG / transport.rest is volunteer-run and was fully down (503) on 2026-09-28.** The commute tool falls back to estimates; don't rely on it live in the pitch without checking first. `BVG_API_URL` overrides the base URL.
 
 ## Implementing the design (next chat)
 
@@ -192,9 +210,10 @@ Test queries without the browser: write a `.mts` script (top-level await) that l
   - Chat UI shows each tool call.
   - Placeholder dashboard rewired to the real data.
   - Build, lint and typecheck are clean.
-- **Not committed:** everything after the create-next-app initial commit is still uncommitted. Commit before starting the design work.
+  - Landing page built from Figma (light + dark, mobile + desktop). Dashboard moved to `/explore`.
+  - Data gaps filled: OSM green/water/parks/cafés + Wikimedia photos (committed JSON, seeded into `kiez_enrichment`), `nature`/`amenities` ranking factors, `outsideRing` filter, `get_commute` tool (BVG), hosted web search in chat.
 - **Next:**
-  - The final UI from Figma, including a Kiez-finder UI on top of `rankKiez` (weight sliders).
+  - The remaining Figma screens, especially the Kiez finder (the CTA target) on top of `rankKiez` (weight sliders + commute) and a PLZ detail page (gem cards link to `/explore` for now).
   - Deploy (above).
 - **Ideas, not started:**
   - Add a `transitLines` filter to `rankKiez`.

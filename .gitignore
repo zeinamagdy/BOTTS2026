@@ -45,4 +45,9 @@ next-env.d.ts
 /public/maplibre
 
 # team data repo, cloned by `npm run data:fetch`
-/data
+/data/*
+# our own derived JSON (OSM, Wikimedia) is committed; the seed needs it
+!/data/derived/
+
+# generated OSM cache
+data/derived/.cache/

@@ -1,8 +1,11 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  /* config options here */
   reactCompiler: true,
-};
+  images: {
+    // Kiez photos from Wikimedia Commons (data/derived/kiez-photos.json)
+    remotePatterns: [{ protocol: "https", hostname: "**.wikimedia.org" }],
+  },
+}
 
-export default nextConfig;
+export default nextConfig

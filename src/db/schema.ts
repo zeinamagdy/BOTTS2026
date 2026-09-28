@@ -348,7 +348,32 @@ export const crimeStats = pgTable(
   ],
 )
 
+/**
+ * Per-PLZ extras we derive ourselves (not in the data repo). Built from the JSON
+ * files in data/derived/ (`npm run data:osm`, `npm run data:photos`).
+ * - OSM: parks/cafés/playgrounds within 1 km of the PLZ centroid (ODbL)
+ * - Wikimedia Commons: one freely licensed photo near the centroid
+ */
+export const kiezEnrichment = pgTable("kiez_enrichment", {
+  plz: integer("plz").primaryKey(),
+  parks1km: integer("parks_1km"),
+  parkAreaM2: doublePrecision("park_area_m2"),
+  /** Share of the 1 km circle covered by parks/forest/meadow (0–1) */
+  greenShare1km: real("green_share_1km"),
+  waterShare1km: real("water_share_1km"),
+  cafes1km: integer("cafes_1km"),
+  playgrounds1km: integer("playgrounds_1km"),
+  nearestParkName: text("nearest_park_name"),
+  nearestParkKm: real("nearest_park_km"),
+  photoUrl: text("photo_url"),
+  photoTitle: text("photo_title"),
+  photoAuthor: text("photo_author"),
+  photoLicense: text("photo_license"),
+  photoPage: text("photo_page"),
+})
+
 export type KiezProfile = typeof kiezProfiles.$inferSelect
+export type KiezEnrichment = typeof kiezEnrichment.$inferSelect
 export type School = typeof schools.$inferSelect
 export type Address = typeof addresses.$inferSelect
 export type Rental = typeof rentals.$inferSelect

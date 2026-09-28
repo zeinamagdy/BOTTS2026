@@ -13,7 +13,7 @@ import { parse } from "csv-parse"
 import { getTableColumns, getTableName, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/postgres-js"
 import type { PgTable } from "drizzle-orm/pg-core"
-import { createReadStream, existsSync } from "node:fs"
+import { createReadStream, existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import postgres from "postgres"
 import * as s from "./schema"
@@ -132,7 +132,61 @@ function buildAddressIndex(rows: Row[]) {
   }
 }
 
+const DERIVED = path.resolve("data/derived")
+
+/** Merges data/derived/{osm-amenities,kiez-photos}.json into kiez_enrichment. */
+async function loadEnrichment() {
+  const read = (f: string) => {
+    const file = path.join(DERIVED, f)
+    if (!existsSync(file)) {
+      console.log(`  (skipping ${f}: not found)`)
+      return new Map<number, Record<string, unknown>>()
+    }
+    const { rows } = JSON.parse(readFileSync(file, "utf8")) as {
+      rows: ({ plz: number } & Record<string, unknown>)[]
+    }
+    return new Map(rows.map((r) => [r.plz, r]))
+  }
+  const osm = read("osm-amenities.json")
+  const photos = read("kiez-photos.json")
+  const plzs = [...new Set([...osm.keys(), ...photos.keys()])]
+  await db.delete(s.kiezEnrichment)
+  if (!plzs.length) return
+  const num = (v: unknown) => (typeof v === "number" ? v : null)
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null)
+  await db.insert(s.kiezEnrichment).values(
+    plzs.map((plz) => {
+      const o = osm.get(plz) ?? {}
+      const p = photos.get(plz) ?? {}
+      return {
+        plz,
+        parks1km: num(o.parks1km),
+        parkAreaM2: num(o.parkAreaM2),
+        greenShare1km: num(o.greenShare1km),
+        waterShare1km: num(o.waterShare1km),
+        cafes1km: num(o.cafes1km),
+        playgrounds1km: num(o.playgrounds1km),
+        nearestParkName: str(o.nearestParkName),
+        nearestParkKm: num(o.nearestParkKm),
+        photoUrl: str(p.thumbUrl),
+        photoTitle: str(p.title),
+        photoAuthor: str(p.author),
+        photoLicense: str(p.license),
+        photoPage: str(p.pageUrl),
+      }
+    }),
+  )
+  console.log(
+    `  ${"kiez_enrichment".padEnd(20)} ${String(plzs.length).padStart(7)} rows`,
+  )
+}
+
 async function main() {
+  if (process.argv.includes("--enrichment-only")) {
+    await loadEnrichment()
+    await client.end()
+    return
+  }
   if (!existsSync(SRC)) {
     console.error(
       `Data not found at ${DATA_DIR}. Run \`npm run data:fetch\` first.`,
@@ -297,6 +351,8 @@ async function main() {
     table: s.crimeStats,
     rename: { district: "bezirk" },
   })
+
+  await loadEnrichment()
 
   console.log(`Done in ${((Date.now() - t0) / 1000).toFixed(1)}s`)
   await client.end()

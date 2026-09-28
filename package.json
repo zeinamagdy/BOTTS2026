@@ -17,7 +17,10 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts",
+    "db:enrich": "tsx src/db/seed.ts --enrichment-only",
     "data:fetch": "node scripts/fetch-data.mjs",
+    "data:osm": "node scripts/fetch-osm.mjs",
+    "data:photos": "node scripts/fetch-photos.mjs",
     "db:setup": "npm run data:fetch && npm run db:push -- --force && npm run db:seed"
   },
   "dependencies": {

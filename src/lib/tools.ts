@@ -1,8 +1,10 @@
 import "server-only"
+import type OpenAI from "openai"
 import { zodResponsesFunction } from "openai/helpers/zod"
 import { z } from "zod"
 import {
   addressInput,
+  commuteInput,
   crimeInput,
   kitaInput,
   priceTrendInput,
@@ -15,6 +17,7 @@ import {
 import {
   checkRentFairness,
   findKitas,
+  getCommute,
   getCrimeByArea,
   getKiezDetail,
   getPriceTrend,
@@ -101,15 +104,32 @@ const defs = [
     parameters: crimeInput,
     run: getCrimeByArea,
   },
+  {
+    name: "get_commute",
+    description:
+      "Public transport travel time (BVG timetable, next weekday morning) from up to 10 candidate PLZs to where the person works or studies. Results flagged estimated=true are straight-line estimates because the live API was down: say so.",
+    parameters: commuteInput,
+    run: getCommute,
+  },
 ] as const
 
-export const tools = defs.map((d) =>
-  zodResponsesFunction({
-    name: d.name,
-    description: d.description,
-    parameters: d.parameters,
-  }),
-)
+/** OpenAI's hosted web search. OpenAI runs it, so runTool never sees it. */
+const webSearch: OpenAI.Responses.WebSearchTool = {
+  type: "web_search",
+  search_context_size: "medium",
+  user_location: { type: "approximate", country: "DE", city: "Berlin" },
+}
+
+export const tools: OpenAI.Responses.Tool[] = [
+  ...defs.map((d) =>
+    zodResponsesFunction({
+      name: d.name,
+      description: d.description,
+      parameters: d.parameters,
+    }),
+  ),
+  webSearch,
+]
 
 /** Runs a tool call and returns its JSON output (errors are returned to the model, not thrown). */
 export async function runTool(
@@ -154,6 +174,13 @@ function summarize(result: unknown): string {
   if (Array.isArray(result)) return `${result.length} rows`
   const r = result as Record<string, unknown>
   const n = new Intl.NumberFormat("en")
+  if (Array.isArray(r.results) && typeof r.to === "string") {
+    const rs = r.results as { minutes: number; estimated: boolean }[]
+    const est = rs.some((x) => x.estimated) ? " (estimated)" : ""
+    return rs.length
+      ? `${rs[0].minutes}–${rs.at(-1)!.minutes} min to ${r.to}${est}`
+      : "No results"
+  }
   if (typeof r.candidates === "number")
     return `${n.format(r.candidates)} areas scored`
   if (typeof r.verdict === "string") return r.verdict

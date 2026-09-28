@@ -5,6 +5,7 @@ import {
   BabyIcon,
   CheckIcon,
   ChevronRightIcon,
+  GlobeIcon,
   GraduationCapIcon,
   HomeIcon,
   InfoIcon,
@@ -15,6 +16,7 @@ import {
   SendIcon,
   ShieldIcon,
   SparklesIcon,
+  TrainFrontIcon,
   TrendingUpIcon,
   TrophyIcon,
   WrenchIcon,
@@ -55,6 +57,8 @@ const TOOL_META: Record<string, { label: string; icon: LucideIcon }> = {
   find_kitas: { label: "Found kitas", icon: BabyIcon },
   list_schools: { label: "Listed schools", icon: GraduationCapIcon },
   get_crime_by_area: { label: "Crime by area", icon: ShieldIcon },
+  get_commute: { label: "Commute times (BVG)", icon: TrainFrontIcon },
+  web_search: { label: "Web search", icon: GlobeIcon },
 }
 
 const SUGGESTIONS = [

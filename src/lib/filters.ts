@@ -76,6 +76,12 @@ export const rankKiezInput = z.object({
       locationQuality: weight.describe(
         "Share of addresses with Wohnlage 'gut'",
       ),
+      nature: weight.describe(
+        "Green (parks, forest) and water share within 1 km (OpenStreetMap)",
+      ),
+      amenities: weight.describe(
+        "Cafés and playgrounds within 1 km (OpenStreetMap)",
+      ),
     })
     .nullable()
     .describe(
@@ -97,6 +103,12 @@ export const rankKiezInput = z.object({
     })
     .nullable()
     .describe("Only keep PLZs that have rental listings matching this"),
+  outsideRing: z
+    .boolean()
+    .nullable()
+    .describe(
+      "true = only PLZs outside the S-Bahn Ring, false = only inside. Berlin only, no Brandenburg",
+    ),
   limit,
 })
 export type RankKiezInput = z.infer<typeof rankKiezInput>
@@ -202,6 +214,22 @@ export const schoolInput = z.object({
   minTier: z.enum(TIERS).nullable().describe("Minimum tier_vs_peer"),
   limit,
 })
+
+export const commuteInput = z.object({
+  to: z
+    .string()
+    .describe(
+      "Where the person commutes to: an address ('Friedrichstraße 100'), a station or a place ('Alexanderplatz', 'Charité')",
+    ),
+  plzs: z
+    .array(z.number().int())
+    .describe("Candidate home PLZs to compare, up to 10"),
+  departAt: z
+    .string()
+    .nullable()
+    .describe("Departure time HH:MM on the next weekday, default 08:00"),
+})
+export type CommuteInput = z.infer<typeof commuteInput>
 
 export const crimeInput = z.object({ bezirk: z.enum(BEZIRKE).nullable() })
 

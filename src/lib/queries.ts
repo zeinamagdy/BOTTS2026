@@ -4,6 +4,7 @@ import {
   asc,
   count,
   desc,
+  getTableColumns,
   eq,
   gte,
   inArray,
@@ -16,6 +17,7 @@ import { db } from "@/db"
 import {
   addresses,
   crimeStats,
+  kiezEnrichment,
   kiezPricesMonthly,
   kiezProfiles,
   kitas,
@@ -25,10 +27,13 @@ import {
   sales,
   schools,
   transitStations,
+  type KiezEnrichment,
   type KiezProfile,
 } from "@/db/schema"
+import { bvgGeocode, bvgJourney, type Place } from "@/lib/bvg"
 import {
   TIERS,
+  type CommuteInput,
   type Loose,
   type RankKiezInput,
   type RentalFilters,
@@ -131,8 +136,72 @@ export async function getBezirkSummary() {
     .sort((a, b) => a.avgRentPerM2 - b.avgRentPerM2)
 }
 
-export async function getKiezProfiles() {
-  return db.select().from(kiezProfiles).orderBy(asc(kiezProfiles.plz))
+/** Profile + our own OSM/photo enrichment (null fields if not seeded). */
+type KiezFull = KiezProfile &
+  Omit<KiezEnrichment, "plz"> & { insideRing: boolean }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- drop plz, keep the rest
+const { plz: _plz, ...enrichmentCols } = getTableColumns(kiezEnrichment)
+
+export async function getKiezProfiles(): Promise<KiezFull[]> {
+  const [rows, ring] = await Promise.all([
+    db
+      .select({ ...getTableColumns(kiezProfiles), ...enrichmentCols })
+      .from(kiezProfiles)
+      .leftJoin(kiezEnrichment, eq(kiezEnrichment.plz, kiezProfiles.plz))
+      .orderBy(asc(kiezProfiles.plz)),
+    getRingPolygon(),
+  ])
+  return rows.map((r) => ({
+    ...(r as Omit<KiezFull, "insideRing">),
+    insideRing: ring.length > 2 && pointInPolygon(r.lat, r.lon, ring),
+  }))
+}
+
+async function getKiezFull(plz: number) {
+  return (await getKiezProfiles()).find((p) => p.plz === plz) ?? null
+}
+
+/** Ringbahn stations missing from transit_stations.csv (coordinates from OSM). */
+const MISSING_RING_STATIONS = [
+  { lat: 52.5186, lon: 13.2842 }, // Westend
+  { lat: 52.5075, lon: 13.2835 }, // Messe Nord/ICC
+  { lat: 52.5429, lon: 13.3664 }, // Wedding
+  { lat: 52.5547, lon: 13.3977 }, // Bornholmer Straße
+]
+
+/**
+ * The S-Bahn Ring as a polygon: the "S Ringbahn" stations (plus the ones the
+ * data repo lacks) sorted by angle around their centroid.
+ */
+async function getRingPolygon() {
+  const pts = await db
+    .select({ lat: transitStations.lat, lon: transitStations.lon })
+    .from(transitStations)
+    .where(eq(transitStations.line, "S Ringbahn"))
+  pts.push(...MISSING_RING_STATIONS)
+  const cLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length
+  const cLon = pts.reduce((s, p) => s + p.lon, 0) / pts.length
+  const angle = (p: { lat: number; lon: number }) =>
+    Math.atan2(p.lat - cLat, (p.lon - cLon) * COS_LAT)
+  return pts.sort((a, b) => angle(a) - angle(b))
+}
+
+function pointInPolygon(
+  lat: number,
+  lon: number,
+  poly: { lat: number; lon: number }[],
+) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]
+    const b = poly[j]
+    if (
+      a.lat > lat !== b.lat > lat &&
+      lon < ((b.lon - a.lon) * (lat - a.lat)) / (b.lat - a.lat) + a.lon
+    )
+      inside = !inside
+  }
+  return inside
 }
 
 // ─── Neighbourhood ranking ───────────────────────────────────────────────────
@@ -140,7 +209,7 @@ export async function getKiezProfiles() {
 type Factor = keyof NonNullable<RankKiezInput["weights"]>
 const FACTORS: Record<
   Factor,
-  { value: (p: KiezProfile) => number | null; higherIsBetter: boolean }
+  { value: (p: KiezFull) => number | null; higherIsBetter: boolean }
 > = {
   affordability: {
     value: (p) => p.rentPerM2KaltSynthetic,
@@ -152,18 +221,32 @@ const FACTORS: Record<
   kitas: { value: (p) => p.totalKitaCapacity, higherIsBetter: true },
   transit: { value: (p) => p.transitDistanceKm, higherIsBetter: false },
   locationQuality: { value: (p) => p.pctWohnlageGut, higherIsBetter: true },
+  nature: {
+    value: (p) =>
+      p.greenShare1km == null
+        ? p.parkAreaM2
+        : p.greenShare1km + (p.waterShare1km ?? 0) / 2,
+    higherIsBetter: true,
+  },
+  amenities: {
+    value: (p) =>
+      p.cafes1km == null && p.playgrounds1km == null
+        ? null
+        : (p.cafes1km ?? 0) + (p.playgrounds1km ?? 0),
+    higherIsBetter: true,
+  },
 }
 const tierRank = (t: string | null) =>
   t ? TIERS.length - TIERS.indexOf(t as (typeof TIERS)[number]) : 0
 
 /** Percentile rank in [0, 1] of every profile for one factor (1 = best). Missing = 0.5. */
-function percentileScores(profiles: KiezProfile[], factor: Factor) {
+function percentileScores(profiles: KiezFull[], factor: Factor) {
   const { value, higherIsBetter } = FACTORS[factor]
   const vals = profiles
     .map(value)
     .filter((v): v is number => v != null)
     .sort((a, b) => a - b)
-  return (p: KiezProfile) => {
+  return (p: KiezFull) => {
     const v = value(p)
     if (v == null || vals.length < 2) return 0.5
     // Midpoint of ties, so identical Bezirk-level values score the same
@@ -178,7 +261,11 @@ function percentileScores(profiles: KiezProfile[], factor: Factor) {
  * Scores every PLZ on weighted factors (percentile ranks across all of Berlin) and
  * returns the best matches. PLZs with <100 addresses (parks, industrial) are skipped.
  */
-export async function rankKiez(input: Loose<RankKiezInput> = {}) {
+export async function rankKiez(
+  input: Loose<Omit<RankKiezInput, "weights">> & {
+    weights?: Loose<NonNullable<RankKiezInput["weights"]>> | null
+  } = {},
+) {
   const all = (await getKiezProfiles()).filter((p) => p.nAddresses >= 100)
   const given = Object.entries(input.weights ?? {}).filter(
     ([, w]) => w != null && w > 0,
@@ -227,6 +314,7 @@ export async function rankKiez(input: Loose<RankKiezInput> = {}) {
         (input.maxTransitKm == null ||
           (p.transitDistanceKm ?? Infinity) <= input.maxTransitKm) &&
         tierRank(p.abiturTierBezirk) >= minTier &&
+        (input.outsideRing == null || input.outsideRing === !p.insideRing) &&
         (!apt || (apt.get(p.plz)?.matching ?? 0) > 0),
     )
     .map((p) => {
@@ -239,6 +327,7 @@ export async function rankKiez(input: Loose<RankKiezInput> = {}) {
         plz: p.plz,
         ortsteil: p.ortsteil,
         bezirk: p.bezirk,
+        insideRing: p.insideRing,
         score: Math.round(score * 100),
         factorScores,
         facts: kiezFacts(p),
@@ -254,8 +343,46 @@ export async function rankKiez(input: Loose<RankKiezInput> = {}) {
   }
 }
 
+/**
+ * Landing page: the best family Kieze outside the Ring (kitas, schools, safety,
+ * air, nature), each with its photo, plus the total PLZ count.
+ */
+export async function getHomeHighlights() {
+  const [profiles, ranked] = await Promise.all([
+    getKiezProfiles(),
+    rankKiez({
+      weights: { kitas: 4, schools: 4, safety: 3, air: 3, nature: 3 },
+      outsideRing: true,
+      minAbiturTier: "OK",
+      limit: 3,
+    }),
+  ])
+  const byPlz = new Map(profiles.map((p) => [p.plz, p]))
+  return {
+    totalKieze: profiles.length,
+    outsideRing: profiles.filter((p) => !p.insideRing).length,
+    gems: ranked.results.map((r) => {
+      const p = byPlz.get(r.plz)!
+      return {
+        ...r,
+        photo: p.photoUrl
+          ? {
+              url: p.photoUrl,
+              title: p.photoTitle,
+              author: p.photoAuthor,
+              license: p.photoLicense,
+              page: p.photoPage,
+            }
+          : null,
+      }
+    }),
+  }
+}
+export type HomeHighlights = Awaited<ReturnType<typeof getHomeHighlights>>
+export type HomeGem = HomeHighlights["gems"][number]
+
 /** Compact, rounded summary of a profile (what the LLM and UI usually need). */
-function kiezFacts(p: KiezProfile) {
+function kiezFacts(p: KiezFull) {
   return {
     rentPerM2KaltSynthetic: round(p.rentPerM2KaltSynthetic, 2),
     buyPricePerM2Real2023: round(p.buyPricePerM2Real),
@@ -269,14 +396,20 @@ function kiezFacts(p: KiezProfile) {
     nearestStation: p.nearestTransitStation
       ? `${p.nearestTransitStation} (${p.nearestTransitLine}, ${round(p.transitDistanceKm, 1)} km)`
       : null,
+    greenPct1km: round(p.greenShare1km == null ? null : p.greenShare1km * 100),
+    waterPct1km: round(p.waterShare1km == null ? null : p.waterShare1km * 100),
+    parks1km: p.parks1km,
+    parkAreaHa1km: round(p.parkAreaM2 == null ? null : p.parkAreaM2 / 10_000),
+    nearestPark: p.nearestParkName
+      ? `${p.nearestParkName} (${round(p.nearestParkKm, 1)} km)`
+      : null,
+    cafes1km: p.cafes1km,
+    playgrounds1km: p.playgrounds1km,
   }
 }
 
 export async function getKiezDetail(plz: number) {
-  const [profile] = await db
-    .select()
-    .from(kiezProfiles)
-    .where(eq(kiezProfiles.plz, plz))
+  const profile = await getKiezFull(plz)
   if (!profile) return null
   const [rentByRooms, topSchools, bigKitas, stations, real] = await Promise.all(
     [
@@ -551,10 +684,7 @@ export async function lookupAddress(
       .where(and(onStreet, eq(addresses.hnr, hnr)))
       .limit(1)
     if (hit) {
-      const [profile] = await db
-        .select()
-        .from(kiezProfiles)
-        .where(eq(kiezProfiles.plz, hit.plz))
+      const profile = await getKiezFull(hit.plz)
       return {
         found: "address" as const,
         address: hit,
@@ -853,4 +983,76 @@ export async function getCrimeByArea(f: { bezirk?: string | null } = {}) {
 
 export type Overview = Awaited<ReturnType<typeof getOverview>>
 export type BezirkSummary = Awaited<ReturnType<typeof getBezirkSummary>>[number]
-export type KiezRow = KiezProfile
+export type KiezRow = KiezFull
+
+// ─── Commute (BVG) ───────────────────────────────────────────────────────────
+
+/** Geocode from our own data when the BVG API is down: address, station or PLZ. */
+async function geocodeLocal(query: string): Promise<Place | null> {
+  const q = query.trim()
+  if (/^\d{5}$/.test(q)) {
+    const p = await getKiezFull(Number(q))
+    return p ? { lat: p.lat, lon: p.lon, name: `PLZ ${q}` } : null
+  }
+  const m = q.match(/^(.+?)\s+(\d+\s*[a-z]?)$/i)
+  if (m) {
+    const r = await lookupAddress(m[1], m[2])
+    if (r.found === "address")
+      return { lat: r.address.lat, lon: r.address.lon, name: q }
+  }
+  const [station] = await db
+    .select()
+    .from(transitStations)
+    .where(sql`${transitStations.stationName} ilike ${`%${q}%`}`)
+    .limit(1)
+  if (station)
+    return { lat: station.lat, lon: station.lon, name: station.stationName }
+  const [street] = await db
+    .select({ lat: avgOf(addresses.lat), lon: avgOf(addresses.lon) })
+    .from(addresses)
+    .where(
+      eq(streetKey(addresses.strasse), normStreet(q).replace(/[\s-]/g, "")),
+    )
+  return street?.lat ? { lat: street.lat, lon: street.lon, name: q } : null
+}
+
+/**
+ * Door-to-door public transport time from each candidate PLZ (centroid) to a
+ * work place, next weekday morning. Uses the live BVG API; when it is down,
+ * falls back to a straight-line estimate flagged `estimated: true`.
+ */
+export async function getCommute({ to, plzs, departAt }: CommuteInput) {
+  const live = await bvgGeocode(to)
+  // No geocode answer usually means the API is down: don't wait for journeys too
+  const dest = live ?? (await geocodeLocal(to))
+  if (!dest) return { error: `Could not find "${to}" in Berlin` }
+  const profiles = await getKiezProfiles()
+  const homes = [...new Set(plzs)]
+    .slice(0, 10)
+    .map((plz) => profiles.find((p) => p.plz === plz))
+    .filter((p) => p != null)
+  const results = await Promise.all(
+    homes.map(async (p) => {
+      const from = { lat: p.lat, lon: p.lon, name: `${p.plz} Berlin` }
+      const j = live ? await bvgJourney(from, dest, departAt) : null
+      const km =
+        111.32 * Math.hypot(p.lat - dest.lat, (p.lon - dest.lon) * COS_LAT)
+      return {
+        plz: p.plz,
+        ortsteil: p.ortsteil,
+        straightLineKm: round(km, 1),
+        ...(j
+          ? { ...j, estimated: false }
+          : // ~22 km/h door to door incl. walking and waiting, typical for Berlin ÖPNV
+            { minutes: Math.round(8 + (km / 22) * 60), estimated: true }),
+      }
+    }),
+  )
+  return {
+    to: dest.name,
+    source: results.some((r) => !r.estimated)
+      ? "BVG timetable (v6.bvg.transport.rest)"
+      : "Estimate from straight-line distance (BVG API unavailable)",
+    results: results.sort((a, b) => a.minutes - b.minutes),
+  }
+}

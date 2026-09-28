@@ -33,6 +33,11 @@ Data caveats you must respect:
 - Air quality is from the nearest of 15 stations, February 2026 only.
 - Transit data covers only U1, U2, U7, U8, S1, Stadtbahn and S Ringbahn (135 stations). If someone asks about another line (e.g. U6, U9, S41), say it isn't in the data and offer the nearest alternative. Station distances are straight-line km computed from coordinates.
 - check_rent_fairness is a market comparison, not a legal Mietspiegel calculation. Don't give legal advice.
+- Green/water share, parks, cafés and playgrounds (within 1 km of the PLZ centre) come from OpenStreetMap. They are good for comparing areas; small green spaces may be missing.
+- "Outside the Ring" means outside the S-Bahn Ring (rank_neighbourhoods outsideRing=true). The data covers Berlin only, not Brandenburg.
+- get_commute uses the live BVG timetable. If results say estimated=true, the API was down and the minutes are a rough straight-line estimate: say so.
+
+Web search: use it only for what the database can't answer, such as recommended flat size per household (e.g. WBS Wohnflächengrenzen), Brandenburg towns near Berlin, or current rules and programmes. Prefer official sources (berlin.de, brandenburg.de, IBB, BVG). Cite the source inline as a markdown link and say the information comes from the web, not from our data. Never use the web to replace numbers our tools provide.
 
 Be concise. Use markdown: short lists, a small table when comparing areas, bold key numbers.`
 
@@ -74,16 +79,57 @@ export async function POST(req: Request) {
               tools: round < MAX_TOOL_ROUNDS ? tools : undefined,
               previous_response_id: previousResponseId,
               reasoning: { effort: "medium" },
+              include: ["web_search_call.action.sources"],
               max_output_tokens: 16000,
               stream: true,
             },
             { signal: abort.signal },
           )
           const calls: OpenAI.Responses.ResponseFunctionToolCall[] = []
+          const searchStarted = new Map<string, number>()
           let refused = false
           for await (const event of stream) {
             if (event.type === "response.output_text.delta") {
               write(event.delta)
+            } else if (
+              event.type === "response.output_item.added" &&
+              event.item.type === "web_search_call"
+            ) {
+              searchStarted.set(event.item.id, Date.now())
+            } else if (
+              event.type === "response.output_item.done" &&
+              event.item.type === "web_search_call"
+            ) {
+              // Hosted tool: OpenAI already ran it, we only surface it in the UI
+              const { id, action, status } = event.item
+              const query =
+                action?.type === "search"
+                  ? (action.queries?.join(" · ") ?? action.query ?? "")
+                  : action?.type === "open_page"
+                    ? (action.url ?? "")
+                    : (action?.pattern ?? "")
+              const sources =
+                action?.type === "search"
+                  ? (action.sources?.map((s) => s.url) ?? [])
+                  : []
+              send({
+                type: "tool_call",
+                id,
+                name: "web_search",
+                args: { query, sources },
+              })
+              send({
+                type: "tool_result",
+                id,
+                ok: status === "completed",
+                summary:
+                  action?.type === "search"
+                    ? `${sources.length} sources`
+                    : action?.type === "open_page"
+                      ? "Opened page"
+                      : "Searched page",
+                ms: Date.now() - (searchStarted.get(id) ?? Date.now()),
+              })
             } else if (
               event.type === "response.output_item.done" &&
               event.item.type === "function_call"
