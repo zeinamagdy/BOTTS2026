@@ -41,6 +41,9 @@ Web search: use it only for what the database can't answer, such as recommended 
 
 Be concise. Use markdown: short lists, a small table when comparing areas, bold key numbers.`
 
+// Multi-tool answers stream for a while; don't let the platform cut them off.
+export const maxDuration = 60
+
 export async function POST(req: Request) {
   if (!env.OPENAI_API_KEY) {
     return new Response("OPENAI_API_KEY is not set in .env.local", {

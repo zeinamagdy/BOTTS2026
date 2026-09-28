@@ -7,7 +7,15 @@ import * as schema from "./schema"
 const globalForDb = globalThis as unknown as {
   pg?: ReturnType<typeof postgres>
 }
-const client = globalForDb.pg ?? postgres(env.DATABASE_URL, { max: 10 })
+// Neon's pooled URL (-pooler host) goes through PgBouncer in transaction mode,
+// which doesn't support prepared statements. Serverless needs a small pool.
+const pooled = env.DATABASE_URL.includes("-pooler")
+const client =
+  globalForDb.pg ??
+  postgres(env.DATABASE_URL, {
+    max: process.env.VERCEL ? 3 : 10,
+    prepare: !pooled,
+  })
 if (process.env.NODE_ENV !== "production") globalForDb.pg = client
 
 export const db = drizzle(client, { schema })
