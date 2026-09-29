@@ -5,7 +5,7 @@ import type { Picks } from "@/lib/finder-params"
 import { suggestInput, suggestPicks } from "@/lib/finder"
 
 export type SuggestResult =
-  { ok: true; picks: Picks } | { ok: false; error: string }
+  { ok: true; picks: Picks; extras: string[] } | { ok: false; error: string }
 
 /** "Fill in from my text": the AI reads the free text and suggests a pick per key. */
 export async function suggestPicksAction(
@@ -18,7 +18,7 @@ export async function suggestPicksAction(
       error: z.prettifyError(parsed.error),
     }
   try {
-    return { ok: true, picks: await suggestPicks(parsed.data) }
+    return { ok: true, ...(await suggestPicks(parsed.data)) }
   } catch (err) {
     console.error("suggestPicks failed:", (err as Error).message)
     return {

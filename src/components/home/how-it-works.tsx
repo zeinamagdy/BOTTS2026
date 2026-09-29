@@ -120,30 +120,29 @@ export function HowItWorks({ spotlight }: { spotlight: HomeGem | null }) {
       <div className="grid gap-x-6 gap-y-16 md:grid-cols-2">
         <Step
           title="Tell us about your family"
-          text="Be it work, Kita, your preferred commute, we can provide help"
+          text="Kids, work, commute: a few answers are enough."
         >
           <Panel className="font-inter flex flex-col justify-center gap-6 px-6 text-lg sm:px-10 sm:text-xl">
             <UserBubble>
-              Hello, what is the ideal house size for a one kid family?
+              We are two parents with a 3-year-old. I commute to Mitte.
             </UserBubble>
             <BotBubble>
-              The ideal size is at least 100 m² averaging at least 38 m²
+              Got it. I will look for areas with a Kita nearby and a short
+              commute.
             </BotBubble>
-            <UserBubble>Are there any houses that match the size?</UserBubble>
+            <UserBubble>Ideally somewhere green.</UserBubble>
           </Panel>
         </Step>
 
         <Step
           title="Pick what matters"
-          text="Nature, community, budget and more to suit you."
+          text="Mark what is a must have and what is flexible: nature, Kitas, budget and more."
         >
           <Panel className="font-inter flex flex-col justify-center gap-5 px-6 text-lg sm:px-12 sm:text-xl">
-            <UserBubble>
-              What are some close locations for me and my kids?
-            </UserBubble>
-            <BotBubble>I can find those for you.</BotBubble>
+            <UserBubble>We want green space and a Kita close by.</UserBubble>
+            <BotBubble>Noted. What else is a must have?</BotBubble>
             <p className="max-w-[306px]">
-              What would be some important locations for you?
+              What would be important to have nearby?
             </p>
             <div className="flex flex-wrap gap-3 font-sans">
               <Chip>Kita</Chip>
@@ -156,7 +155,7 @@ export function HowItWorks({ spotlight }: { spotlight: HomeGem | null }) {
 
         <Step
           title="Discover your Kieze"
-          text="Get area recommendations based on you and for you."
+          text="Get the best-fit Kieze, ranked for your family."
         >
           <Panel className="flex items-center justify-center p-6">
             <div className="bg-card flex w-[283px] flex-col gap-2 rounded-[14px] p-3 shadow-lg ring-1 ring-black/5">
@@ -190,7 +189,7 @@ export function HowItWorks({ spotlight }: { spotlight: HomeGem | null }) {
 
         <Step
           title="See a new life"
-          text="Explore each area with custom maps, local spots and clear trades."
+          text="Explore each area with custom maps, local spots and clear trade-offs."
         >
           <Panel className="aspect-[556/468] min-h-0 sm:h-auto">
             <Image

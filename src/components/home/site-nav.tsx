@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 
 const LINKS = [
   { href: "/#how-it-works", label: "How it works" },
-  { href: "/#hidden-gems", label: "For people" },
+  { href: "/#hidden-gems", label: "Hidden gems" },
   { href: "/#about", label: "About" },
 ]
 

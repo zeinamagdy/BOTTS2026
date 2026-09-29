@@ -1,10 +1,12 @@
 import Image from "next/image"
 import { BadgeAlertIcon, SquarePlusIcon } from "lucide-react"
 import { ShowAreaButton } from "@/components/finder/show-area-button"
-import type { KiezMatch } from "@/lib/queries"
+import { FactIcons } from "@/components/finder/fact-icons"
+import type { FinderResults } from "@/lib/finder"
 import { cn } from "@/lib/utils"
 import house from "../../../public/home/house.jpg"
 
+type KiezMatch = FinderResults["results"][number]
 type Facts = KiezMatch["facts"]
 type Phrase = (f: Facts, hobbies: string[]) => string | null
 
@@ -84,12 +86,12 @@ const PHRASES: Record<string, { good: Phrase; weak: Phrase }> = {
   },
   nearCenter: {
     good: (f) =>
-      f.distanceFromCenterKm != null
-        ? `Only ${f.distanceFromCenterKm} km to Alexanderplatz`
+      f.minutesToCentre != null
+        ? `Only ~${f.minutesToCentre} min to Alexanderplatz`
         : "Close to the centre",
     weak: (f) =>
-      f.distanceFromCenterKm != null
-        ? `${f.distanceFromCenterKm} km from Alexanderplatz`
+      f.minutesToCentre != null
+        ? `~${f.minutesToCentre} min to Alexanderplatz`
         : "Far from the centre",
   },
   locationQuality: {
@@ -102,26 +104,26 @@ const PHRASES: Record<string, { good: Phrase; weak: Phrase }> = {
   parks: {
     good: (f) =>
       f.parks1kmPlz != null
-        ? `${plural(f.parks1kmPlz, "park")} within 1 km`
+        ? `${plural(f.parks1kmPlz, "park")} within a 12 min walk`
         : "Parks within walking distance",
     weak: (f) =>
-      `Few parks nearby${f.parks1kmPlz != null ? ` (${f.parks1kmPlz} within 1 km)` : ""}`,
+      `Few parks nearby${f.parks1kmPlz != null ? ` (${f.parks1kmPlz} within a 12 min walk)` : ""}`,
   },
   cafes: {
     good: (f) =>
       f.cafes1kmPlz != null
-        ? `${plural(f.cafes1kmPlz, "café")} within 1 km`
+        ? `${plural(f.cafes1kmPlz, "café")} within a 12 min walk`
         : "Cafés around the corner",
     weak: (f) =>
-      `Quiet café scene${f.cafes1kmPlz != null ? ` (${f.cafes1kmPlz} within 1 km)` : ""}`,
+      `Quiet café scene${f.cafes1kmPlz != null ? ` (${f.cafes1kmPlz} within a 12 min walk)` : ""}`,
   },
   playgrounds: {
     good: (f) =>
       f.playgrounds1kmPlz != null
-        ? `${plural(f.playgrounds1kmPlz, "playground")} within 1 km`
+        ? `${plural(f.playgrounds1kmPlz, "playground")} within a 12 min walk`
         : "Playgrounds nearby",
     weak: (f) =>
-      `Few playgrounds nearby${f.playgrounds1kmPlz != null ? ` (${f.playgrounds1kmPlz} within 1 km)` : ""}`,
+      `Few playgrounds nearby${f.playgrounds1kmPlz != null ? ` (${f.playgrounds1kmPlz} within a 12 min walk)` : ""}`,
   },
   affordability: {
     good: (f) =>
@@ -185,8 +187,8 @@ function describe(m: KiezMatch) {
       : "A residential area"
   const where = m.insideRing ? "inside the S-Bahn Ring" : "outside the Ring"
   const centre =
-    f.distanceFromCenterKm != null
-      ? `, ${f.distanceFromCenterKm} km from Alexanderplatz`
+    f.minutesToCentre != null
+      ? `, ~${f.minutesToCentre} min to Alexanderplatz`
       : ""
   const stop = f.nearestStation
     ? ` Nearest stop: ${station(f.nearestStation)}.`
@@ -237,11 +239,13 @@ export function MatchCard({
   match: m,
   weights,
   hobbies,
+  wanted,
   maxCommute,
 }: {
   match: KiezMatch
   weights: Record<string, number>
   hobbies: string[]
+  wanted: string[]
   maxCommute: number
 }) {
   const place = clean(m.ortsteil)
@@ -282,6 +286,16 @@ export function MatchCard({
           <p className="text-subtle text-lg leading-normal">{describe(m)}</p>
         </div>
 
+        <FactIcons
+          facts={m.facts}
+          wanted={[
+            ...Object.entries(weights)
+              .filter(([, w]) => w >= 5)
+              .map(([k]) => k),
+            ...wanted,
+          ]}
+        />
+
         {m.commutes.map((c) => (
           <Row key={c.kind + c.to} label={many ? c.kind : "Commute"}>
             <div
@@ -315,7 +329,19 @@ export function MatchCard({
         ))}
 
         <Row label="Budget">
-          {rent != null ? (
+          {m.typicalRent ? (
+            <p className="ml-auto flex flex-col items-end text-right">
+              <span className="text-muted-foreground text-sm font-medium whitespace-nowrap">
+                ~€{m.typicalRent.warm.toLocaleString("en-GB")}/month warm
+              </span>
+              <span className="text-faint text-xs">
+                typical {plural(m.typicalRent.rooms, "room")}
+                {rent != null &&
+                  ` · ${euro(rent)}/m² cold, ${rent <= MEDIAN_RENT ? "below" : "above"} median`}
+                {" · synthetic"}
+              </span>
+            </p>
+          ) : rent != null ? (
             <p className="ml-auto flex flex-col items-end text-right">
               <span className="text-muted-foreground text-sm font-medium whitespace-nowrap">
                 {euro(rent)}/m² cold

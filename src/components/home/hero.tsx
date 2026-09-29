@@ -19,7 +19,7 @@ export function Hero() {
       <div className="absolute inset-x-0 top-0 -z-10 h-2/3 bg-gradient-to-b from-black/35 to-transparent" />
       <div className="flex w-full max-w-[1120px] flex-col items-center gap-8 px-4 pt-32 text-center text-white sm:gap-10 sm:pt-[162px]">
         <p className="text-sm font-bold tracking-wide">
-          LEAVE THE BERLIN CHAOS BEHIND
+          HIDDEN GEMS FOR FAMILIES OUTSIDE THE RING
         </p>
         <h1 className="text-[3.25rem] leading-[0.9] font-medium text-balance sm:text-8xl lg:text-[128px]">
           LEAVE THE BERLIN CHAOS BEHIND

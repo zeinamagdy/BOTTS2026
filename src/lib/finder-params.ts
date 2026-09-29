@@ -1,5 +1,8 @@
 import { z } from "zod"
-import { HOBBIES, type RankPlanungsraumInput } from "@/lib/filters"
+import {
+  HOBBIES as POI_HOBBIES,
+  type RankPlanungsraumInput,
+} from "@/lib/filters"
 
 /**
  * The Kiez finder's answers, kept in the URL so a result is shareable and the
@@ -23,8 +26,25 @@ export const MAX_PLACES = 3
 type Factor = keyof NonNullable<RankPlanungsraumInput["weights"]>
 /** Every ranking factor except `hobbies`, which the hobby chips drive */
 export type PriorityKey = Exclude<Factor, "hobbies">
-export type Hobby = (typeof HOBBIES)[number]
-export { HOBBIES }
+
+/**
+ * Everything a person can tick under "Things you'd like nearby". The first three are
+ * OSM hobby points (ranked through `rankPlanungsraum`'s `hobbies`); the rest raise the
+ * weight of the ranking factor of the same key to Must have.
+ */
+export const INTERESTS = [
+  { value: "yoga", label: "Yoga" },
+  { value: "gym", label: "Gym" },
+  { value: "bouldering", label: "Bouldering" },
+  { value: "cafes", label: "Cafés" },
+  { value: "playgrounds", label: "Playgrounds" },
+  { value: "parks", label: "Parks & green" },
+] as const
+export type Hobby = (typeof INTERESTS)[number]["value"]
+export const HOBBIES = INTERESTS.map((i) => i.value) as Hobby[]
+export type PoiHobby = (typeof POI_HOBBIES)[number]
+export const isPoiHobby = (h: Hobby): h is PoiHobby =>
+  (POI_HOBBIES as readonly string[]).includes(h)
 
 export const PRIORITY_GROUPS = [
   "Family",
@@ -116,9 +136,9 @@ export const FEATURED_KEYS: PriorityKey[] = [
 ]
 
 export const LEVELS = [
-  { value: "protect", label: "Protect", weight: 5 },
-  { value: "ok", label: "OK", weight: 2 },
-  { value: "letgo", label: "Let go", weight: 0 },
+  { value: "protect", label: "Must have", weight: 5 },
+  { value: "ok", label: "Flexible", weight: 2 },
+  { value: "letgo", label: "Don't need", weight: 0 },
 ] as const
 export type Level = (typeof LEVELS)[number]["value"]
 export const levelWeight = (l: Level) =>
@@ -129,6 +149,8 @@ const levelOfWeight = (w: number): Level | null =>
 export const MUST_HAVES = [
   { value: "kita", label: "A Kita in the area" },
   { value: "kinderarzt", label: "A Kinderarzt (paediatrician) nearby" },
+  { value: "playground", label: "A playground nearby" },
+  { value: "park", label: "A park nearby" },
   { value: "outsideRing", label: "Outside the S-Bahn Ring" },
 ] as const
 export type MustHave = (typeof MUST_HAVES)[number]["value"]

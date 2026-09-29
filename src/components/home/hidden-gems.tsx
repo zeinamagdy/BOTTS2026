@@ -77,8 +77,8 @@ export function HiddenGems({
         </h2>
         <p className="text-muted-foreground text-lg">
           {outsideRing
-            ? `See ${outsideRing} postcodes outside the Ring that can be just the right fit`
-            : "See the postcodes outside the Ring that can be just the right fit"}
+            ? `See ${outsideRing} Kieze outside the Ring that can be just the right fit`
+            : "See the Kieze outside the Ring that can be just the right fit"}
         </p>
       </div>
       {gems.length > 0 ? (

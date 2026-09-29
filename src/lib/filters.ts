@@ -179,6 +179,16 @@ export const rankPlanungsraumInput = z.object({
     .boolean()
     .nullable()
     .describe("Only areas whose dominant PLZ has a paediatrician (OSM)"),
+  requirePlayground: z
+    .boolean()
+    .nullable()
+    .describe(
+      "Only areas with ≥1 playground within 1 km of the dominant PLZ (OSM)",
+    ),
+  requirePark: z
+    .boolean()
+    .nullable()
+    .describe("Only areas with ≥1 park within 1 km of the dominant PLZ (OSM)"),
   apartment: z
     .object({
       maxWarmmiete: z.number().nullable(),

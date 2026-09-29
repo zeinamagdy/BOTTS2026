@@ -35,6 +35,7 @@ import {
   type KiezProfile,
   type Planungsraum,
 } from "@/db/schema"
+import { withPhotoOverride } from "@/lib/area-photos"
 import { bvgGeocode, bvgJourney, type Place } from "@/lib/bvg"
 import {
   TIERS,
@@ -381,15 +382,18 @@ export async function getHomeHighlights() {
       const p = byPlz.get(r.plz)!
       return {
         ...r,
-        photo: p.photoUrl
-          ? {
-              url: p.photoUrl,
-              title: p.photoTitle,
-              author: p.photoAuthor,
-              license: p.photoLicense,
-              page: p.photoPage,
-            }
-          : null,
+        photo: withPhotoOverride(
+          r.plz,
+          p.photoUrl
+            ? {
+                url: p.photoUrl,
+                title: p.photoTitle,
+                author: p.photoAuthor,
+                license: p.photoLicense,
+                page: p.photoPage,
+              }
+            : null,
+        ),
       }
     }),
   }
@@ -638,10 +642,16 @@ function plrFacts(p: PlanungsraumFull) {
     kitaPlaces: p.totalKitaCapacity,
     kitaPlacesPer100Under6: perChild == null ? null : round(perChild * 100),
     crimePer10kBezirk: round(p.crimeRatePer10k),
+    /** "Name (line, N min walk)" at 12 min per km */
     nearestStation: p.nearestTransitStation
-      ? `${p.nearestTransitStation} (${p.nearestTransitLine}, ${round(p.transitDistanceKm, 1)} km)`
+      ? `${p.nearestTransitStation} (${p.nearestTransitLine}, ${Math.max(1, Math.round((p.transitDistanceKm ?? 0) * 12))} min walk)`
       : null,
     distanceFromCenterKm: round(p.distanceFromCenterKm, 1),
+    /** Estimated ÖPNV minutes to Alexanderplatz (same fit as the commute estimate) */
+    minutesToCentre:
+      p.distanceFromCenterKm == null
+        ? null
+        : estimateTransitMinutes(p.distanceFromCenterKm),
     population: p.nPopulation,
     pctUnder6:
       under6 != null && p.nPopulation
@@ -745,6 +755,8 @@ async function scorePlanungsraeume(input: RankPlrInput) {
         (input.outsideRing == null || input.outsideRing === !p.insideRing) &&
         (!input.requireKita || (p.nKitas ?? 0) > 0) &&
         (!input.requireKinderarzt || p.hasKinderarztPlz === true) &&
+        (!input.requirePlayground || (p.playgrounds1kmPlz ?? 0) > 0) &&
+        (!input.requirePark || (p.parks1kmPlz ?? 0) > 0) &&
         (!apt || (apt.get(p.plrId)?.matching ?? 0) > 0),
     )
     .map((p) => {
@@ -762,14 +774,17 @@ async function scorePlanungsraeume(input: RankPlrInput) {
         insideRing: p.insideRing,
         lat: p.lat,
         lon: p.lon,
-        photo: p.photoUrl
-          ? {
-              url: p.photoUrl,
-              author: p.photoAuthor,
-              license: p.photoLicense,
-              page: p.photoPage,
-            }
-          : null,
+        photo: withPhotoOverride(
+          p.dominantPlz,
+          p.photoUrl
+            ? {
+                url: p.photoUrl,
+                author: p.photoAuthor,
+                license: p.photoLicense,
+                page: p.photoPage,
+              }
+            : null,
+        ),
         score: Math.round(score * 100),
         factorScores,
         facts: plrFacts(p),
@@ -818,6 +833,31 @@ export async function getPlanungsraumDetail(plrId: string) {
     /** Every Kita and OSM point inside the area, for the per-Kiez map */
     pois,
   }
+}
+
+/**
+ * Median (synthetic) warm rent per month for a typical flat of `rooms` rooms in each area.
+ * Uses the closest room count the area has listings for; `null` when it has none.
+ */
+export async function getTypicalRents(plrIds: string[], rooms: number) {
+  if (!plrIds.length) return new Map<string, { rooms: number; warm: number }>()
+  const rows = await db
+    .select({
+      plrId: rentals.plrId,
+      rooms: rentals.rooms,
+      warm: median(rentals.warmmiete),
+    })
+    .from(rentals)
+    .where(inArray(rentals.plrId, plrIds))
+    .groupBy(rentals.plrId, rentals.rooms)
+  const best = new Map<string, { rooms: number; warm: number }>()
+  for (const r of rows) {
+    if (!r.plrId || r.rooms == null || r.warm == null) continue
+    const cur = best.get(r.plrId)
+    if (!cur || Math.abs(r.rooms - rooms) < Math.abs(cur.rooms - rooms))
+      best.set(r.plrId, { rooms: r.rooms, warm: Math.round(r.warm) })
+  }
+  return best
 }
 
 /** Example (synthetic) rentals inside a Planungsraum; the closest available room count fills in. */

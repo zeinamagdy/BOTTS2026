@@ -24,7 +24,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   effectivePicks,
   FEATURED_KEYS,
-  HOBBIES,
+  INTERESTS,
   LEVELS,
   MUST_HAVES,
   PRIORITY_GROUPS,
@@ -37,7 +37,6 @@ import {
 } from "@/lib/finder-params"
 import { cn } from "@/lib/utils"
 
-const HOBBY_LABELS = { yoga: "Yoga", gym: "Gym", bouldering: "Bouldering" }
 const HIDDEN_KEYS = PRIORITY_KEYS.filter((k) => !FEATURED_KEYS.includes(k))
 
 function PriorityRow({
@@ -96,7 +95,7 @@ function Subsection({
 }
 
 /**
- * Step 2, "What matters most?": one Protect / OK / Let go switch per ranking key from
+ * Step 2, "What matters most?": one Must have / Flexible / Don't need switch per ranking key from
  * the database (`PRIORITY_META`), hobbies, must-haves and a rent cap. The optional text
  * box asks the AI to fill in the switches, which the person can then adjust.
  */
@@ -133,6 +132,7 @@ export function PrioritiesStep({
 
   const textRef = useRef<HTMLTextAreaElement>(null)
   const [needText, setNeedText] = useState(false)
+  const [extras, setExtras] = useState<string[]>([])
 
   const fillIn = () => {
     if (!state.priorities.trim()) {
@@ -156,6 +156,7 @@ export function PrioritiesStep({
         (k) => res.picks.levels[k] !== picks.levels[k],
       )
       set({ picks: res.picks })
+      setExtras(res.extras)
       setHighlight(changed)
       setPinned((p) => [
         ...new Set([...p, ...changed.filter((k) => HIDDEN_KEYS.includes(k))]),
@@ -177,8 +178,8 @@ export function PrioritiesStep({
     <FinderShell
       aside={
         <AsideText step="Step 2 of 2" title="Priorities & trade-offs">
-          Every move trades something. Tell us what you want to protect and what
-          you can afford to let go
+          Every move trades something. Tell us what you must have and what you
+          don&apos;t need
         </AsideText>
       }
     >
@@ -227,8 +228,8 @@ export function PrioritiesStep({
       <div className="flex flex-col gap-6">
         {state.picks == null && (state.kids > 0 || state.expecting) && (
           <p className="text-subtle text-sm">
-            We started from your household: Kitas and schools are set to
-            Protect.
+            We started from your household: Kitas and schools are set to Must
+            have.
           </p>
         )}
         {PRIORITY_GROUPS.map((g) => {
@@ -274,13 +275,28 @@ export function PrioritiesStep({
         )}
       </div>
 
-      <Subsection title="Hobbies">
+      <Subsection title="Nice to have nearby">
         <ToggleChips
-          label="Hobbies"
-          options={HOBBIES.map((h) => ({ value: h, label: HOBBY_LABELS[h] }))}
+          label="Nice to have nearby"
+          options={INTERESTS}
           value={picks.hobbies}
           onChange={(hobbies) => setPicks({ hobbies })}
         />
+        {extras.length > 0 && (
+          <ul className="flex flex-wrap items-center gap-2">
+            {extras.map((e) => (
+              <li
+                key={e}
+                className="text-faint border-input rounded-full border border-dashed px-3 py-1.5 text-sm"
+              >
+                {e}
+              </li>
+            ))}
+            <li className="text-faint text-sm">
+              Noted, but we have no data on these yet
+            </li>
+          </ul>
+        )}
       </Subsection>
 
       <Subsection title="Must-haves">

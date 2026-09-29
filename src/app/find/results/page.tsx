@@ -15,7 +15,7 @@ import { defaultMapLayers } from "@/lib/map-layers"
 import { getResultsMap } from "@/lib/queries"
 
 export const metadata: Metadata = {
-  title: "Your Kiez matches · Kiez Concierge",
+  title: "Your best-fit Kieze · Kiez Concierge",
 }
 
 const NUMBER_WORDS = ["No", "One", "Two", "Three"]
@@ -32,12 +32,11 @@ function household(s: FinderState) {
 
 /** The answers as tags (Figma: "1 child, baby on the way", "Max 45 min", priorities). */
 function tags(s: FinderState, r: FinderResults) {
-  const cap = (t: string) => t[0].toUpperCase() + t.slice(1)
   return [
     household(s),
     r.places.some((p) => p.foundAs) && `Max ${s.commute} min`,
     ...r.understood.protect,
-    ...r.understood.hobbies.map(cap),
+    ...r.understood.interestLabels,
     ...r.understood.mustHaves,
   ].filter(Boolean) as string[]
 }
@@ -158,6 +157,7 @@ export default async function ResultsPage({
               match={r}
               weights={data.weightsUsed}
               hobbies={data.understood.hobbies}
+              wanted={data.understood.wanted}
               maxCommute={s.commute}
             />
           ))}
