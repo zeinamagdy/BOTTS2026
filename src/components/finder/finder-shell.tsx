@@ -79,3 +79,17 @@ export function FieldLabel({
     </label>
   )
 }
+
+/** Page frame of the results screen (Figma "Results"): navbar + one full-width white card. */
+export function ResultsShell({ children }: { children: ReactNode }) {
+  return (
+    <main className="flex flex-1 flex-col">
+      <SiteNav tone="page" />
+      <div className="mx-auto w-full max-w-[1184px] px-4 pt-4 pb-16 sm:px-6 sm:pt-8">
+        <div className="bg-card flex flex-col gap-10 rounded-3xl p-5 sm:gap-12 sm:p-10">
+          {children}
+        </div>
+      </div>
+    </main>
+  )
+}

@@ -43,10 +43,11 @@ Env lives in `.env.local` (git-ignored; `.env.example` is committed): `DATABASE_
 src/app/page.tsx                  landing page from Figma (node 19:270): nav, hero, How it works, Hidden Gems
 src/app/explore/page.tsx          old placeholder dashboard (Overview / Kiez map / AI Assistant)
 src/app/find/page.tsx             Kiez finder wizard from Figma (Step 01 = node 41:3826, Step 2 = node 57:5068), `?step=2`; all "Find my Kiez →" CTAs point here
-src/app/find/results/page.tsx     finder results (no Figma design yet, built in the same style) + loading.tsx
+src/app/find/results/page.tsx     finder results from Figma (node 69:250): headline, answer tags + "Edit tags", 3 cards (photo, commute bar, budget, main benefit/trade-off from the weighted factors, "Explore area" scrolls to the map and selects that area) + a priorities map + loading.tsx
 src/app/find/actions.ts           Server Action `suggestPicksAction` ("Fill in from my text")
 src/components/finder/            finder-shell (nav + card + grey aside), choice-group (ChoiceGroup + ToggleChips), form-bits (FIELD, StepButtons), finder-wizard (client, step 1), priorities-step (step 2), match-card
 src/lib/finder-params.ts          client-safe: the priority keys (`PRIORITY_META`, typed against the `rankPlanungsraumInput` weights, so a new factor fails the build until it has a label), Protect/OK/Let go levels (5/2/0), must-haves, rent caps, household defaults, and answers <-> URL (home, kids, baby, place=Kind:address ≤3, commute, w=key:weight,…, hobby, must, rent, q)
+src/components/finder/results-map.tsx   results map (client, lazy via results-map-lazy): one area at a time (outline + number tabs), highlight layers from `src/lib/map-layers.ts`; the person's protected priorities start switched on. Parks/green and school grounds recolour the basemap's own layers; schools, playgrounds, cafés and stations are circles on the basemap's `poi` source layer (OpenMapTiles classes, counted inside the outline only at zoom ≥14, where the tiles are complete); Kitas, Kinderarzt and hobbies are our `poi_locations` via `getResultsMap(plrIds)`. Cards talk to it through the `kiez:show-area` window event (`show-area-button.tsx`)
 src/lib/finder.ts                 server: picks → rankPlanungsraum input (deterministic, no model) → findKiezMatches; `suggestPicks` (OpenAI `responses.parse`, FAST_MODEL, gets the current picks and changes only what the text mentions, cached in memory)
 src/components/home/              landing sections (site-nav, hero, torn-edge, how-it-works, hidden-gems, find-kiez-button)
 public/home/                      Figma image exports (hero.jpg is only 1024 px wide, ask the designer for full res)
@@ -147,6 +148,7 @@ All take plain objects. Filter fields may be `null` or missing, and both mean "n
 | `findKiezMatches({ rank, places, maxCommuteMin, limit })` | the finder's results: `rankPlanungsraum` scoring, then keeps areas whose **estimated** ÖPNV time to every place is within the limit, checks the best 2×limit with live BVG journeys (areas passing with a +6 min margin, the fit's 75th-percentile error, first) and lists the ones that really fit first (`overLimit` marks the rest). `relaxed: true` when nothing fits. The estimate is `14.6 + 2.6 × straight-line km`, fitted on 72 live journeys (median error ~0), also used by `getCommute`'s fallback |
 | `getPlanungsraumDetail(plrId)` | full row + `facts`, rent by room count (via `rentals.plr_id`) and every Kita/OSM point (`pois`). `null` for an unknown id. `plrId` is a string |
 | `getPlanungsraumRentals({ plrId, rooms, limit })` | example synthetic rentals, exact room count first, closest counts fill in (`roomsRelaxed` says so) |
+| `getResultsMap(plrIds)` | finder results map: each area's polygon + bbox (in `plrIds` order) and the `poi_locations` points within ~0.9 km of it |
 | `getPlanungsraumBoundaries(plrIds?)` | GeoJSON FeatureCollection of PLR polygons (all 542 ≈ 6 MB, so pass `plrIds` to show only results) |
 | `getKiezDetail(plz)` | PLZ detail page: full profile, rent by room count, top schools in the Bezirk, largest kitas, 3 nearest stations, real 2023 sale prices |
 | `searchRentals(filters)` / `searchSales({ kind: "resale" \| "new_build", … })` | listing search: bezirke, plz, ortsteil, rooms, area, price, balcony, wohnlage, `near {lat, lon, radiusKm}`, `transitLines` + `maxStationKm` (default 1 km), sort. Returns total, median and rows with `nearestStation` |
@@ -261,12 +263,12 @@ If the deployed page shows "Database not ready", read the grey error text under 
   - Deployed on Vercel + Neon; the Planungsraum schema and data were applied to Neon on 2026-09-29.
   - Data gaps filled: OSM green/water/parks/cafés + Wikimedia photos (committed JSON, seeded into `kiez_enrichment`), `nature`/`amenities` ranking factors, `outsideRing` filter, `get_commute` tool (BVG), hosted web search in chat.
 - **Next:**
-  - A Figma design for the finder results page, and a Planungsraum detail page for the result cards to link to (gem cards still link to `/explore`).
+  - A Planungsraum detail page for the result cards to link to (gem cards still link to `/explore`).
   - (Deployed to Vercel + Neon; keep Neon in step with `main`, see "Deploying".)
 - **Ideas, not started:**
   - Add a `transitLines` filter to `rankKiez`.
   - Use the VBB network for transit filters (real stations exist in `planungsraum`; `transit_stations` is still 7 lines).
-  - Finder results: PLR polygons on a map (`getPlanungsraumBoundaries(plrIds)`), address autocomplete (`lookupAddress` suggestions).
+  - Finder results: address autocomplete (`lookupAddress` suggestions).
   - Optional PLZ×Bezirk population table (`DATA  SOURCES/berlin_population_by_plz_bezirk.csv`), skipped on purpose: PLR already has allocated population, the vintage is unknown and 3 PLZs are missing.
   - Choropleth from `planungsraum_boundaries`.
   - If the transit `exists` filter gets slow, add a bounding-box pre-filter (currently 0.1–0.6 s).

@@ -1,149 +1,164 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { connection } from "next/server"
-import { FinderShell, AsideText } from "@/components/finder/finder-shell"
+import { ResultsShell } from "@/components/finder/finder-shell"
 import { MatchCard } from "@/components/finder/match-card"
-import { Button } from "@/components/ui/button"
+import { ResultsMapLazy } from "@/components/finder/results-map-lazy"
 import { getFinderResults, type FinderResults } from "@/lib/finder"
-import { finderQuery, parseFinderParams } from "@/lib/finder-params"
+import {
+  effectivePicks,
+  finderQuery,
+  parseFinderParams,
+  type FinderState,
+} from "@/lib/finder-params"
+import { defaultMapLayers } from "@/lib/map-layers"
+import { getResultsMap } from "@/lib/queries"
 
 export const metadata: Metadata = {
   title: "Your Kiez matches · Kiez Concierge",
 }
 
-function Chips({ label, items }: { label: string; items: string[] }) {
-  if (!items.length) return null
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-subtle text-sm font-medium">{label}</p>
-      <ul className="flex flex-wrap gap-2">
-        {items.map((t) => (
-          <li
-            key={t}
-            className="bg-card text-heading rounded-full border px-3 py-1 text-sm"
-          >
-            {t}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
+const NUMBER_WORDS = ["No", "One", "Two", "Three"]
+
+function household(s: FinderState) {
+  const kids =
+    s.kids === 0
+      ? "No children"
+      : s.kids === 1
+        ? "1 child"
+        : `${s.kids} children`
+  return s.expecting ? `${kids}, baby on the way` : kids
 }
 
-function Understood({ r, commute }: { r: FinderResults; commute: number }) {
-  const places = r.places.filter((p) => p.foundAs)
-  const missing = r.places.filter((p) => !p.foundAs)
-  return (
-    <div className="flex flex-col gap-6">
-      <AsideText title="Your suggestions">
-        {r.understood.fromHousehold
-          ? "Ranked on your household. Edit your answers to set your own priorities."
-          : "Ranked on the priorities you picked."}
-      </AsideText>
-      <Chips label="You want to protect" items={r.understood.protect} />
-      <Chips label="You can let go" items={r.understood.letGo} />
-      <Chips
-        label="Hobbies"
-        items={r.understood.hobbies.map((h) => h[0].toUpperCase() + h.slice(1))}
-      />
-      <Chips label="Must-haves" items={r.understood.mustHaves} />
-      {places.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-subtle text-sm font-medium">
-            Max {commute} min by public transport to
-          </p>
-          <ul className="text-heading text-sm">
-            {places.map((p) => (
-              <li key={p.kind + p.address}>
-                <span className="font-medium">{p.kind}:</span> {p.foundAs}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {missing.length > 0 && (
-        <p className="text-destructive text-sm">
-          Couldn&apos;t find {missing.map((p) => `“${p.address}”`).join(", ")}{" "}
-          in Berlin, so it is not part of the commute check.
-        </p>
-      )}
-    </div>
-  )
+/** The answers as tags (Figma: "1 child, baby on the way", "Max 45 min", priorities). */
+function tags(s: FinderState, r: FinderResults) {
+  const cap = (t: string) => t[0].toUpperCase() + t.slice(1)
+  return [
+    household(s),
+    r.places.some((p) => p.foundAs) && `Max ${s.commute} min`,
+    ...r.understood.protect,
+    ...r.understood.hobbies.map(cap),
+    ...r.understood.mustHaves,
+  ].filter(Boolean) as string[]
 }
 
-async function load(s: ReturnType<typeof parseFinderParams>) {
+function headline(r: FinderResults) {
+  const n = r.results.length
+  if (r.relaxed) return "The closest matches we found"
+  if (n === 1) return "One area you may not have considered"
+  return `${NUMBER_WORDS[n] ?? n} areas you may not have considered`
+}
+
+function subline(s: FinderState, r: FinderResults) {
+  const areas = r.results
+  const ring = areas.every((a) => !a.insideRing)
+    ? "All outside the Ring"
+    : areas.every((a) => a.insideRing)
+      ? "All inside the Ring"
+      : "Inside and outside the Ring"
+  const who = s.kids > 0 || s.expecting ? "your family goes" : "you go"
+  const hasPlaces = r.places.some((p) => p.foundAs)
+  if (!hasPlaces) return `${ring}, ranked on what matters to you.`
+  if (r.relaxed)
+    return `No area gets you everywhere within ${s.commute} min. These come closest.`
+  const allFit = areas.every((a) => !a.commutes.some((c) => c.overLimit))
+  return allFit
+    ? `${ring}, all within ${s.commute} min of the places ${who} every day.`
+    : `${ring}. The live timetable puts some journeys over ${s.commute} min (marked red).`
+}
+
+async function load(s: FinderState) {
   try {
-    return { data: await getFinderResults(s), error: null }
+    const data = await getFinderResults(s)
+    // The map is extra: the results still show if it fails
+    const map = await getResultsMap(data.results.map((r) => r.plrId)).catch(
+      (err: Error) => {
+        console.error("getResultsMap failed:", err.message)
+        return null
+      },
+    )
+    return { data, map, error: null }
   } catch (err) {
     console.error("getFinderResults failed:", (err as Error).message)
-    return { data: null, error: (err as Error).message }
+    return { data: null, map: null, error: (err as Error).message }
   }
 }
+
+const editLink =
+  "text-brand-600 rounded-full px-3 py-2 text-lg font-medium hover:underline"
 
 export default async function ResultsPage({
   searchParams,
 }: PageProps<"/find/results">) {
   await connection() // reads live DB data
   const s = parseFinderParams(await searchParams)
-  const { data, error } = await load(s)
+  const { data, map, error } = await load(s)
   const edit = `/find?${finderQuery(s, { step: "2" })}`
 
   if (!data)
     return (
-      <FinderShell
-        aside={<AsideText title="Something went wrong">{error}</AsideText>}
-      >
-        <p className="text-muted-foreground text-lg">
-          We couldn&apos;t rank the neighbourhoods right now. Please try again.
-        </p>
-        <Button nativeButton={false} render={<Link href={edit} />}>
-          Back to my answers
-        </Button>
-      </FinderShell>
+      <ResultsShell>
+        <div className="flex flex-col gap-5">
+          <h1 className="text-foreground text-4xl leading-[1.1] font-medium sm:text-[52px]">
+            Something went wrong
+          </h1>
+          <p className="text-muted-foreground text-lg">
+            We couldn&apos;t rank the neighbourhoods right now. Please try
+            again.
+          </p>
+          <p className="text-faint text-sm">{error}</p>
+          <Link href={edit} className={`${editLink} self-start px-0`}>
+            Back to my answers
+          </Link>
+        </div>
+      </ResultsShell>
     )
 
-  const fitting = data.results.filter(
-    (r) => !r.commutes.some((c) => c.overLimit),
-  ).length
+  const missing = data.places.filter((p) => !p.foundAs)
 
   return (
-    <FinderShell
-      aside={
-        <div className="flex flex-col gap-6">
-          <Understood r={data} commute={s.commute} />
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={<Link href={edit} />}
-            className="text-heading h-auto self-start rounded-[12px] px-6 py-3 text-base font-bold"
-          >
-            Edit my answers
-          </Button>
+    <ResultsShell>
+      <div className="flex flex-col gap-5">
+        <div className="flex max-w-[653px] flex-col gap-6">
+          <h1 className="text-foreground text-4xl leading-[1.1] font-medium text-balance sm:text-[52px]">
+            {headline(data)}
+          </h1>
+          <p className="text-muted-foreground text-lg leading-normal">
+            {subline(s, data)}
+          </p>
         </div>
-      }
-    >
-      <div className="flex flex-col gap-2">
-        <h2 className="text-heading text-[28px] leading-[1.1] font-medium">
-          Best matches for you
-        </h2>
-        <p className="text-subtle text-sm font-medium">
-          {data.relaxed
-            ? `No area fits every commute within ${s.commute} min. These come closest.`
-            : `${data.withinCommute} of ${data.candidates} Berlin neighbourhoods fit your commute limit${
-                fitting < data.results.length
-                  ? `; the live timetable puts ${data.results.length - fitting} of these over it`
-                  : ""
-              }.`}
-        </p>
+        <ul className="flex flex-wrap items-center gap-3 sm:gap-[18px]">
+          {tags(s, data).map((t) => (
+            <li
+              key={t}
+              className="bg-background border-input text-subtle rounded-full border px-3 py-2 text-base font-medium sm:text-lg"
+            >
+              {t}
+            </li>
+          ))}
+          <li>
+            <Link href={edit} className={editLink}>
+              Edit tags
+            </Link>
+          </li>
+        </ul>
+        {missing.length > 0 && (
+          <p className="text-destructive text-sm">
+            Couldn&apos;t find {missing.map((p) => `“${p.address}”`).join(", ")}{" "}
+            in Berlin, so it is not part of the commute check.
+          </p>
+        )}
       </div>
+
       {data.results.length > 0 ? (
-        <ol className="flex flex-col gap-5">
-          {data.results.map((r, i) => (
+        <ol className="grid gap-3.5 md:grid-cols-2 lg:grid-cols-3">
+          {data.results.map((r) => (
             <MatchCard
               key={r.plrId}
               match={r}
-              rank={i + 1}
               weights={data.weightsUsed}
+              hobbies={data.understood.hobbies}
+              maxCommute={s.commute}
             />
           ))}
         </ol>
@@ -153,13 +168,37 @@ export default async function ResultsPage({
           must-haves.
         </p>
       )}
+
+      {map && map.areas.length > 0 && (
+        <section id="results-map" className="flex scroll-mt-6 flex-col gap-6">
+          <div className="flex flex-col gap-3">
+            <h2 className="text-foreground text-[28px] leading-[1.1] font-medium">
+              What matters to you, on the map
+            </h2>
+            <p className="text-muted-foreground text-lg">
+              Your priorities are switched on. Tap a tag to add or hide more,
+              and a number to switch area. Counts are inside the outlined area.
+            </p>
+          </div>
+          <ResultsMapLazy
+            areas={map.areas}
+            pois={map.pois}
+            initialLayers={defaultMapLayers(effectivePicks(s))}
+            hobbies={data.understood.hobbies}
+          />
+        </section>
+      )}
+
       <p className="text-faint text-xs">
-        Match score: percentile ranks across Berlin, weighted by your
+        Map: Kitas from the Berlin Kita register; Kinderarzt, yoga, gyms and
+        bouldering from OpenStreetMap; parks, schools, playgrounds, cafés and
+        stations from the OpenStreetMap basemap (OpenFreeMap). Areas are Berlin
+        Planungsräume, ranked by percentile across the city and weighted by your
         priorities. Rents are synthetic (for comparison only); crime and school
         results are Bezirk-level where no local value exists. Commutes are BVG
         timetable journeys for a weekday 08:00 start, or straight-line estimates
-        marked “est.”.
+        marked “~”.
       </p>
-    </FinderShell>
+    </ResultsShell>
   )
 }

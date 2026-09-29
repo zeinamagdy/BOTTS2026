@@ -44,7 +44,7 @@ export async function getFinderResults(s: FinderState) {
     rank: picksToRank(picks),
     places: s.places,
     maxCommuteMin: s.commute,
-    limit: 6,
+    limit: 3,
   })
   return {
     understood: {

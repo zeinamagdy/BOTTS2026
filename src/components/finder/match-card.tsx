@@ -1,75 +1,263 @@
 import Image from "next/image"
-import { TrainFrontIcon } from "lucide-react"
+import { BadgeAlertIcon, SquarePlusIcon } from "lucide-react"
+import { ShowAreaButton } from "@/components/finder/show-area-button"
 import type { KiezMatch } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 import house from "../../../public/home/house.jpg"
 
-const FACTOR_LABELS: Record<string, string> = {
-  affordability: "Affordable",
-  schools: "Schools",
-  safety: "Safety",
-  noise: "Quiet",
-  air: "Clean air",
-  green: "Green",
-  heat: "Cool summers",
-  kitas: "Kitas",
-  transit: "Transit",
-  locationQuality: "Good area",
-  hobbies: "Hobbies",
-  nearCenter: "Central",
+type Facts = KiezMatch["facts"]
+type Phrase = (f: Facts, hobbies: string[]) => string | null
+
+/** Median synthetic cold rent per m² across the ranked areas */
+const MEDIAN_RENT = 11.9
+
+const ORDINAL: Record<string, string> = {
+  gering: "low",
+  mittel: "medium",
+  hoch: "high",
+  gut: "good",
+  schlecht: "poor",
+}
+const ord = (v: string | null) => (v ? (ORDINAL[v] ?? v) : null)
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
+const euro = (v: number) => `€${v.toFixed(2)}`
+/** "S Storkower Str. (Berlin) (S41, …)" → "S Storkower Str. (S41, …)" */
+const station = (s: string) =>
+  s.replace(/^Berlin,\s*/, "").replace(/\s*\(Berlin\)/, "")
+
+/** Per ranking factor: what to say when the area is strong on it, and when it is weak. */
+const PHRASES: Record<string, { good: Phrase; weak: Phrase }> = {
+  schools: {
+    good: (f) =>
+      f.abiturSchoolsHere
+        ? `${plural(f.abiturSchoolsHere, "school")} with strong Abitur results right here`
+        : "Strong Abitur results in the Bezirk's schools",
+    weak: () => "Abitur results below the Berlin average",
+  },
+  kitas: {
+    good: (f) =>
+      f.nKitas
+        ? `${plural(f.nKitas, "Kita")}${f.kitaPlaces ? ` with ${f.kitaPlaces} places` : ""} in the area`
+        : "Plenty of Kita places for young children",
+    weak: (f) =>
+      f.kitaPlacesPer100Under6 != null
+        ? `Only ${f.kitaPlacesPer100Under6} Kita places per 100 children under 6`
+        : "Few Kita places in the area",
+  },
+  safety: {
+    good: (f) =>
+      f.crimePer10kBezirk != null
+        ? `One of the safer Bezirke: ${f.crimePer10kBezirk} offences per 10,000 residents`
+        : "One of the safer Bezirke",
+    weak: (f) =>
+      f.crimePer10kBezirk != null
+        ? `Higher crime rate in the Bezirk: ${f.crimePer10kBezirk} per 10,000 residents`
+        : "Higher crime rate in the Bezirk",
+  },
+  noise: {
+    good: (f) => `Quiet streets (noise level: ${ord(f.noise) ?? "low"})`,
+    weak: (f) =>
+      `Busier, louder streets (noise level: ${ord(f.noise) ?? "high"})`,
+  },
+  air: {
+    good: (f) => `Clean air (pollution: ${ord(f.airPollution) ?? "low"})`,
+    weak: (f) =>
+      `More air pollution than elsewhere (${ord(f.airPollution) ?? "high"})`,
+  },
+  green: {
+    good: () => "Well supplied with parks and green space",
+    weak: () => "Little public green space within walking distance",
+  },
+  heat: {
+    good: () => "Stays cooler in summer heatwaves",
+    weak: (f) => `Heats up in summer (heat stress: ${ord(f.heat) ?? "high"})`,
+  },
+  transit: {
+    good: (f) =>
+      f.nearestStation
+        ? `${station(f.nearestStation)} close by`
+        : "Close to transit",
+    weak: (f) =>
+      f.nearestStation
+        ? `Nearest station is ${station(f.nearestStation)}`
+        : "Further from U- and S-Bahn stations",
+  },
+  nearCenter: {
+    good: (f) =>
+      f.distanceFromCenterKm != null
+        ? `Only ${f.distanceFromCenterKm} km to Alexanderplatz`
+        : "Close to the centre",
+    weak: (f) =>
+      f.distanceFromCenterKm != null
+        ? `${f.distanceFromCenterKm} km from Alexanderplatz`
+        : "Far from the centre",
+  },
+  locationQuality: {
+    good: (f) =>
+      f.pctWohnlageGut != null
+        ? `${f.pctWohnlageGut}% of addresses rated a good Wohnlage`
+        : "A sought-after residential area",
+    weak: () => "Mostly simple or average Wohnlage",
+  },
+  parks: {
+    good: (f) =>
+      f.parks1kmPlz != null
+        ? `${plural(f.parks1kmPlz, "park")} within 1 km`
+        : "Parks within walking distance",
+    weak: (f) =>
+      `Few parks nearby${f.parks1kmPlz != null ? ` (${f.parks1kmPlz} within 1 km)` : ""}`,
+  },
+  cafes: {
+    good: (f) =>
+      f.cafes1kmPlz != null
+        ? `${plural(f.cafes1kmPlz, "café")} within 1 km`
+        : "Cafés around the corner",
+    weak: (f) =>
+      `Quiet café scene${f.cafes1kmPlz != null ? ` (${f.cafes1kmPlz} within 1 km)` : ""}`,
+  },
+  playgrounds: {
+    good: (f) =>
+      f.playgrounds1kmPlz != null
+        ? `${plural(f.playgrounds1kmPlz, "playground")} within 1 km`
+        : "Playgrounds nearby",
+    weak: (f) =>
+      `Few playgrounds nearby${f.playgrounds1kmPlz != null ? ` (${f.playgrounds1kmPlz} within 1 km)` : ""}`,
+  },
+  affordability: {
+    good: (f) =>
+      f.rentPerM2KaltSynthetic != null
+        ? `Rents below the Berlin median (${euro(f.rentPerM2KaltSynthetic)}/m² cold)`
+        : "Rents below the Berlin median",
+    weak: (f) =>
+      f.rentPerM2KaltSynthetic != null
+        ? `Pricier than average (${euro(f.rentPerM2KaltSynthetic)}/m² cold)`
+        : "Pricier than average",
+  },
+  hobbies: {
+    good: (f, hobbies) => {
+      const have = [
+        hobbies.includes("yoga") && f.yogaStudiosInPlz && "yoga",
+        hobbies.includes("gym") && f.gymsInPlz && "a gym",
+        hobbies.includes("bouldering") && f.boulderingInPlz && "bouldering",
+      ].filter(Boolean)
+      return have.length ? `${have.join(", ")} in the postcode` : null
+    },
+    weak: (_, hobbies) => `Not all of ${hobbies.join(", ")} in the postcode`,
+  },
 }
 
-/** "Köpenick (Ort)" → "Köpenick" */
+/** Strongest and weakest of the person's weighted factors, as sentences. */
+function benefitAndTradeOff(
+  m: KiezMatch,
+  weights: Record<string, number>,
+  hobbies: string[],
+) {
+  const ranked = Object.entries(m.factorScores)
+    .filter(([f]) => PHRASES[f] && (weights[f] ?? 0) > 0)
+    .map(([f, score]) => ({ f, score, w: weights[f] }))
+  const best = [...ranked].sort(
+    (a, b) => b.score * b.w - a.score * a.w || b.score - a.score,
+  )
+  const worst = [...ranked].sort((a, b) => a.score - b.score || b.w - a.w)
+  const say = (f: string, kind: "good" | "weak") =>
+    PHRASES[f][kind](m.facts, hobbies)
+
+  const benefit = best.map((x) => say(x.f, "good")).find(Boolean) ?? null
+  const low = worst[0]
+  const tradeOff =
+    low && low.score < 60
+      ? say(low.f, "weak")
+      : "No weak spot among your priorities: every one scores in Berlin's upper half"
+  return { benefit, tradeOff }
+}
+
+/** A short deterministic description from the area's facts (the results page calls no model). */
+function describe(m: KiezMatch) {
+  const f = m.facts
+  const feel = [
+    f.noise === "gering" && "Quiet",
+    f.greenSupply === "gut" && "green",
+  ].filter(Boolean) as string[]
+  const opening = feel.length
+    ? `${feel.join(", ")} streets`
+    : f.dominantWohnlage === "gut"
+      ? "A sought-after residential area"
+      : "A residential area"
+  const where = m.insideRing ? "inside the S-Bahn Ring" : "outside the Ring"
+  const centre =
+    f.distanceFromCenterKm != null
+      ? `, ${f.distanceFromCenterKm} km from Alexanderplatz`
+      : ""
+  const stop = f.nearestStation
+    ? ` Nearest stop: ${station(f.nearestStation)}.`
+    : ""
+  const text = `${opening} ${where}${centre}.${stop}`
+  return text[0].toUpperCase() + text.slice(1)
+}
+
 const clean = (s: string | null) =>
   s?.replace(/\s*\((Ort|Ortsteil)\)$/, "") ?? null
 
-/** The user's most important factors, strongest first, with this area's 0–100 score. */
-function strengths(m: KiezMatch, weights: Record<string, number>) {
-  return Object.entries(m.factorScores)
-    .filter(([f]) => FACTOR_LABELS[f])
-    .sort(
-      ([a, sa], [b, sb]) => (weights[b] ?? 0) - (weights[a] ?? 0) || sb - sa,
-    )
-    .slice(0, 4)
-    .map(([f, score]) => ({ label: FACTOR_LABELS[f], score }))
+function Row({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-[30px]">
+      <p className="text-heading shrink-0 text-lg">{label}</p>
+      {children}
+    </div>
+  )
 }
 
-function factLine(m: KiezMatch) {
-  const f = m.facts
-  return [
-    f.rentPerM2KaltSynthetic != null &&
-      `€${f.rentPerM2KaltSynthetic.toFixed(2)}/m² cold (synthetic)`,
-    f.nKitas != null && `${f.nKitas} Kita${f.nKitas === 1 ? "" : "s"}`,
-    f.distanceFromCenterKm != null &&
-      `${f.distanceFromCenterKm} km to Alexanderplatz`,
-  ]
-    .filter(Boolean)
-    .join(" · ")
+function Point({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: typeof SquarePlusIcon
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-brand-600 flex items-center gap-2 font-bold">
+        <Icon aria-hidden className="size-6" strokeWidth={1.75} />
+        {title}
+      </p>
+      <p className="text-subtle text-lg leading-normal">{children}</p>
+    </div>
+  )
 }
 
 export function MatchCard({
   match: m,
-  rank,
   weights,
+  hobbies,
+  maxCommute,
 }: {
   match: KiezMatch
-  rank: number
   weights: Record<string, number>
+  hobbies: string[]
+  maxCommute: number
 }) {
   const place = clean(m.ortsteil)
+  const { benefit, tradeOff } = benefitAndTradeOff(m, weights, hobbies)
+  const rent = m.facts.rentPerM2KaltSynthetic
+  const many = m.commutes.length > 1
   return (
-    <li className="border-input flex flex-col overflow-hidden rounded-2xl border sm:flex-row">
-      <div className="relative h-44 shrink-0 sm:h-auto sm:w-52">
+    <li className="flex min-w-0 flex-col overflow-hidden rounded-[20px]">
+      <div className="relative h-60 shrink-0 sm:h-[317px]">
         <Image
           src={m.photo?.url ?? house}
           alt={m.photo ? `Street view near ${m.plrName}` : ""}
           fill
-          sizes="(min-width: 640px) 208px, 100vw"
+          sizes="(min-width: 1024px) 360px, 100vw"
           className="object-cover"
         />
-        <span className="bg-brand-500 absolute top-3 left-3 rounded-full px-2.5 py-0.5 text-sm font-bold text-white">
-          #{rank}
-        </span>
         {m.photo && (
           <a
             href={m.photo.page ?? undefined}
@@ -83,70 +271,80 @@ export function MatchCard({
         )}
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-4 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="text-heading text-xl font-medium">{m.plrName}</h3>
-            <p className="text-subtle text-sm">
-              {[
-                place,
-                place !== m.bezirk && m.bezirk,
-                m.insideRing ? "inside the Ring" : "outside the Ring",
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </div>
-          <p className="bg-secondary text-secondary-foreground shrink-0 rounded-full px-3 py-1 text-sm font-bold">
-            {m.score}% match
+      <div className="bg-background flex flex-1 flex-col gap-6 p-6">
+        <div className="flex flex-col gap-3">
+          <p className="text-subtle">
+            {[place !== m.bezirk && place, m.bezirk].filter(Boolean).join(", ")}
           </p>
+          <h3 className="text-foreground text-[28px] leading-[1.1] font-medium">
+            {m.plrName}
+          </h3>
+          <p className="text-subtle text-lg leading-normal">{describe(m)}</p>
         </div>
 
-        {m.commutes.length > 0 && (
-          <ul className="flex flex-wrap gap-2">
-            {m.commutes.map((c) => (
-              <li
-                key={c.kind + c.to}
-                title={c.lines.length ? `via ${c.lines.join(", ")}` : c.to}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-[4px] border px-2 py-0.5 text-sm",
-                  c.overLimit
-                    ? "border-destructive/40 text-destructive"
-                    : "border-input text-heading",
-                )}
-              >
-                <TrainFrontIcon aria-hidden className="size-3.5 opacity-70" />
-                <span className="font-medium">{c.kind}</span>
-                {c.estimated ? `~${c.minutes} min (est.)` : `${c.minutes} min`}
-                {c.lines.length > 0 && (
-                  <span className="text-subtle">· {c.lines.join(", ")}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <ul className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
-          {strengths(m, weights).map((s) => (
-            <li key={s.label} className="flex flex-col gap-1">
-              <span className="text-subtle text-xs font-medium">
-                {s.label}
-                <span className="sr-only">: {s.score} of 100</span>
-              </span>
+        {m.commutes.map((c) => (
+          <Row key={c.kind + c.to} label={many ? c.kind : "Commute"}>
+            <div
+              className="flex min-w-0 flex-1 items-center gap-3.5"
+              title={`To ${c.to}${c.lines.length ? ` via ${c.lines.join(", ")}` : ""}`}
+            >
               <span
                 aria-hidden
-                className="bg-muted h-1.5 overflow-hidden rounded-full"
+                className="bg-chip h-3 min-w-0 flex-1 overflow-hidden rounded-full"
               >
                 <span
-                  className="bg-brand-500 block h-full rounded-full"
-                  style={{ width: `${s.score}%` }}
+                  className={cn(
+                    "block h-full rounded-full",
+                    c.overLimit ? "bg-destructive" : "bg-brand-500",
+                  )}
+                  style={{
+                    width: `${Math.min(100, (c.minutes / maxCommute) * 100)}%`,
+                  }}
                 />
               </span>
-            </li>
-          ))}
-        </ul>
+              <span
+                className={cn(
+                  "shrink-0 text-sm font-medium",
+                  c.overLimit ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {c.estimated ? `~${c.minutes} min` : `${c.minutes} min`}
+              </span>
+            </div>
+          </Row>
+        ))}
 
-        <p className="text-muted-foreground text-sm">{factLine(m)}</p>
+        <Row label="Budget">
+          {rent != null ? (
+            <p className="ml-auto flex flex-col items-end text-right">
+              <span className="text-muted-foreground text-sm font-medium whitespace-nowrap">
+                {euro(rent)}/m² cold
+              </span>
+              <span className="text-faint text-xs">
+                {rent <= MEDIAN_RENT ? "Below" : "Above"} Berlin median ·
+                synthetic
+              </span>
+            </p>
+          ) : (
+            <p className="text-faint ml-auto text-sm">No rent data</p>
+          )}
+        </Row>
+
+        {benefit && (
+          <Point icon={SquarePlusIcon} title="Main benefit">
+            {benefit}
+          </Point>
+        )}
+        <Point icon={BadgeAlertIcon} title="Main trade-off">
+          {tradeOff}
+        </Point>
+
+        <ShowAreaButton
+          plrId={m.plrId}
+          className="bg-brand-500 hover:bg-brand-950 focus-visible:ring-ring mt-auto flex w-full items-center justify-center rounded-[12px] px-8 py-4 text-lg font-bold text-white transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        >
+          Explore area
+        </ShowAreaButton>
       </div>
     </li>
   )

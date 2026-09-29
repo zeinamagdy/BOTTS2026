@@ -9,6 +9,7 @@ import {
   gte,
   inArray,
   lte,
+  or,
   sql,
   type AnyColumn,
   type SQL,
@@ -875,6 +876,65 @@ export async function getPlanungsraumBoundaries(plrIds?: string[] | null) {
     })),
   }
 }
+
+/** Padding around each area for its map points, in degrees (~0.9 km north–south) */
+const AREA_MAP_PAD_DEG = 0.008
+
+/**
+ * The finder's results map: each area's polygon and bounding box, plus the Kita / Kinderarzt /
+ * hobby points in and around it (our own `poi_locations`; parks, schools, playgrounds, cafés and
+ * stops come from the basemap tiles). Areas keep the order of `plrIds`.
+ */
+export async function getResultsMap(plrIds: string[]) {
+  const ids = plrIds.slice(0, 10)
+  if (!ids.length) return { areas: [], pois: [] }
+  const shapes = await getPlanungsraumBoundaries(ids)
+  const areas = ids.flatMap((id) => {
+    const f = shapes.features.find((x) => x.id === id)
+    if (!f) return []
+    const pts = JSON.stringify(f.geometry)
+      .match(/-?\d+\.\d+/g)!
+      .map(Number)
+    const lons = pts.filter((_, i) => i % 2 === 0)
+    const lats = pts.filter((_, i) => i % 2 === 1)
+    return [
+      {
+        plrId: id,
+        plrName: f.properties.plr_name,
+        geometry: f.geometry,
+        /** [west, south, east, north] */
+        bbox: [
+          Math.min(...lons),
+          Math.min(...lats),
+          Math.max(...lons),
+          Math.max(...lats),
+        ] as [number, number, number, number],
+      },
+    ]
+  })
+  const near = areas.map(({ bbox: [w, s, e, n] }) =>
+    and(
+      gte(poiLocations.lon, w - AREA_MAP_PAD_DEG * 1.6),
+      lte(poiLocations.lon, e + AREA_MAP_PAD_DEG * 1.6),
+      gte(poiLocations.lat, s - AREA_MAP_PAD_DEG),
+      lte(poiLocations.lat, n + AREA_MAP_PAD_DEG),
+    ),
+  )
+  const pois = near.length
+    ? await db
+        .select({
+          category: poiLocations.category,
+          name: poiLocations.name,
+          lat: poiLocations.lat,
+          lon: poiLocations.lon,
+          plrId: poiLocations.plrId,
+        })
+        .from(poiLocations)
+        .where(or(...near))
+    : []
+  return { areas, pois }
+}
+export type ResultsMap = Awaited<ReturnType<typeof getResultsMap>>
 
 // ─── Listings search ─────────────────────────────────────────────────────────
 
