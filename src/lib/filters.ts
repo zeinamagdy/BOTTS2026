@@ -113,6 +113,86 @@ export const rankKiezInput = z.object({
 })
 export type RankKiezInput = z.infer<typeof rankKiezInput>
 
+export const HOBBIES = ["yoga", "gym", "bouldering"] as const
+export const rankPlanungsraumInput = z.object({
+  weights: z
+    .object({
+      affordability: weight.describe("Low cold rent per m²"),
+      schools: weight.describe(
+        "Abitur results vs peer schools: the Planungsraum's own schools where it has any, else its Bezirk",
+      ),
+      safety: weight.describe(
+        "Low crime rate per 10,000 residents (Bezirk-level, 2017–2019)",
+      ),
+      noise: weight.describe("Low noise burden (Umweltatlas)"),
+      air: weight.describe("Low air-pollution burden (Umweltatlas)"),
+      green: weight.describe("Good green-space supply (Umweltatlas)"),
+      heat: weight.describe("Low heat stress in summer (Umweltatlas)"),
+      kitas: weight.describe("Kita places per child under 6"),
+      transit: weight.describe(
+        "Close to a station of the full VBB network (U, S, tram, regional)",
+      ),
+      locationQuality: weight.describe(
+        "Share of addresses with Wohnlage 'gut'",
+      ),
+      hobbies: weight.describe(
+        "Share of the chosen `hobbies` available in the PLZ. Ignored without `hobbies`",
+      ),
+      nearCenter: weight.describe("Close to Alexanderplatz"),
+    })
+    .nullable()
+    .describe(
+      "Importance 0–5 per factor. Omitted factors count 0; all omitted = equal weights over all factors except hobbies and nearCenter",
+    ),
+  hobbies: z
+    .array(z.enum(HOBBIES))
+    .nullable()
+    .describe("OpenStreetMap: is there at least one in the dominant PLZ"),
+  bezirke,
+  maxRentPerM2: z
+    .number()
+    .nullable()
+    .describe("Max average cold rent €/m² in the Planungsraum"),
+  maxTransitKm: z.number().nullable().describe("Max km to the nearest station"),
+  minDistanceFromCenterKm: z
+    .number()
+    .nullable()
+    .describe(
+      "At least this far from Alexanderplatz (e.g. 8 for 'less central')",
+    ),
+  maxDistanceFromCenterKm: z.number().nullable(),
+  outsideRing: z
+    .boolean()
+    .nullable()
+    .describe("true = only outside the S-Bahn Ring, false = only inside"),
+  requireKita: z.boolean().nullable().describe("Only areas with ≥1 Kita"),
+  requireKinderarzt: z
+    .boolean()
+    .nullable()
+    .describe("Only areas whose dominant PLZ has a paediatrician (OSM)"),
+  apartment: z
+    .object({
+      maxWarmmiete: z.number().nullable(),
+      minRooms: z.number().int().nullable(),
+      minAreaM2: z.number().nullable(),
+      balcony: z.boolean().nullable(),
+    })
+    .nullable()
+    .describe("Only keep areas that have rental listings matching this"),
+  limit,
+})
+export type RankPlanungsraumInput = z.infer<typeof rankPlanungsraumInput>
+
+export const plrRentalsInput = z.object({
+  plrId: z.string().describe("8-character Planungsraum id, e.g. '01100101'"),
+  rooms: z
+    .number()
+    .int()
+    .nullable()
+    .describe("Wanted room count. Closest available counts fill in"),
+  limit: z.number().int().nullable().describe("Default 3, max 10"),
+})
+
 export const RENTAL_SORTS = [
   "warmmiete_asc",
   "rent_per_m2_asc",

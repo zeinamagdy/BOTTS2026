@@ -22,6 +22,9 @@ import {
   kiezProfiles,
   kitas,
   newConstruction,
+  planungsraum,
+  planungsraumBoundaries,
+  poiLocations,
   realListings2023,
   rentals,
   sales,
@@ -29,6 +32,7 @@ import {
   transitStations,
   type KiezEnrichment,
   type KiezProfile,
+  type Planungsraum,
 } from "@/db/schema"
 import { bvgGeocode, bvgJourney, type Place } from "@/lib/bvg"
 import {
@@ -36,6 +40,7 @@ import {
   type CommuteInput,
   type Loose,
   type RankKiezInput,
+  type RankPlanungsraumInput,
   type RentalFilters,
   type RentCheckInput,
   type SaleFilters,
@@ -239,22 +244,32 @@ const FACTORS: Record<
 const tierRank = (t: string | null) =>
   t ? TIERS.length - TIERS.indexOf(t as (typeof TIERS)[number]) : 0
 
-/** Percentile rank in [0, 1] of every profile for one factor (1 = best). Missing = 0.5. */
-function percentileScores(profiles: KiezFull[], factor: Factor) {
-  const { value, higherIsBetter } = FACTORS[factor]
-  const vals = profiles
+/**
+ * Percentile rank in [0, 1] of every item for one value (1 = best). Missing = 0.5.
+ * Ties score at their midpoint, so identical Bezirk-level values score the same.
+ */
+function percentileScorer<T>(
+  items: T[],
+  value: (item: T) => number | null,
+  higherIsBetter: boolean,
+) {
+  const vals = items
     .map(value)
     .filter((v): v is number => v != null)
     .sort((a, b) => a - b)
-  return (p: KiezFull) => {
-    const v = value(p)
+  return (item: T) => {
+    const v = value(item)
     if (v == null || vals.length < 2) return 0.5
-    // Midpoint of ties, so identical Bezirk-level values score the same
     const lo = vals.findIndex((x) => x >= v)
     const hi = vals.findLastIndex((x) => x <= v)
     const pct = (lo + hi) / 2 / (vals.length - 1)
     return higherIsBetter ? pct : 1 - pct
   }
+}
+
+function percentileScores(profiles: KiezFull[], factor: Factor) {
+  const { value, higherIsBetter } = FACTORS[factor]
+  return percentileScorer(profiles, value, higherIsBetter)
 }
 
 /**
@@ -480,6 +495,356 @@ export async function getKiezDetail(plz: number) {
       listings: real[0].listings,
       medianPricePerM2: round(real[0].medianPricePerM2),
     },
+  }
+}
+
+// ─── Planungsraum (the finer unit, 542 areas) ────────────────────────────────
+
+/** A Planungsraum row plus the readable label and photo of its dominant PLZ. */
+type PlanungsraumFull = Planungsraum & {
+  ortsteil: string | null
+  photoUrl: string | null
+  photoAuthor: string | null
+  photoLicense: string | null
+  photoPage: string | null
+  insideRing: boolean
+}
+
+export async function getPlanungsraeume(): Promise<PlanungsraumFull[]> {
+  const [rows, ring] = await Promise.all([
+    db
+      .select({
+        ...getTableColumns(planungsraum),
+        ortsteil: kiezProfiles.ortsteil,
+        photoUrl: kiezEnrichment.photoUrl,
+        photoAuthor: kiezEnrichment.photoAuthor,
+        photoLicense: kiezEnrichment.photoLicense,
+        photoPage: kiezEnrichment.photoPage,
+      })
+      .from(planungsraum)
+      .leftJoin(kiezProfiles, eq(kiezProfiles.plz, planungsraum.dominantPlz))
+      .leftJoin(
+        kiezEnrichment,
+        eq(kiezEnrichment.plz, planungsraum.dominantPlz),
+      )
+      .orderBy(asc(planungsraum.plrId)),
+    getRingPolygon(),
+  ])
+  return rows.map((r) => ({
+    ...r,
+    insideRing: ring.length > 2 && pointInPolygon(r.lat, r.lon, ring),
+  }))
+}
+
+type PlrFactor = keyof NonNullable<RankPlanungsraumInput["weights"]>
+type Hobby = NonNullable<RankPlanungsraumInput["hobbies"]>[number]
+const LOW_TO_HIGH = ["gering", "mittel", "hoch"] as const
+const POOR_TO_GOOD = ["schlecht", "mittel", "gut"] as const
+/** Position of an ordinal Umweltatlas category, null if missing. */
+function ordinal(levels: readonly string[], v: string | null) {
+  const i = v == null ? -1 : levels.indexOf(v)
+  return i < 0 ? null : i
+}
+const HOBBY_FLAG: Record<Hobby, (p: Planungsraum) => boolean | null> = {
+  yoga: (p) => p.hasYogaStudiosPlz,
+  gym: (p) => p.hasGymPlz,
+  bouldering: (p) => p.hasBoulderingPlz,
+}
+/** Kita places per child under 6, only where the (allocated) population is big enough to mean something. */
+const kitaPlacesPerChild = (p: Planungsraum) =>
+  p.nPopulationUnder6 != null && p.nPopulationUnder6 >= 30
+    ? (p.totalKitaCapacity ?? 0) / p.nPopulationUnder6
+    : null
+
+const PLR_FACTORS: Record<
+  PlrFactor,
+  {
+    value: (p: Planungsraum, hobbies: Hobby[]) => number | null
+    higherIsBetter: boolean
+  }
+> = {
+  affordability: {
+    value: (p) => p.rentPerM2KaltSynthetic,
+    higherIsBetter: false,
+  },
+  // PLR-exact where the area has Abitur schools (~61 areas), else the Bezirk value
+  schools: {
+    value: (p) => p.abiturVsPeerPlr ?? p.abiturVsPeerBezirk,
+    higherIsBetter: true,
+  },
+  safety: { value: (p) => p.crimeRatePer10k, higherIsBetter: false },
+  noise: {
+    value: (p) => ordinal(LOW_TO_HIGH, p.ugLaerm),
+    higherIsBetter: false,
+  },
+  air: { value: (p) => ordinal(LOW_TO_HIGH, p.ugLuft), higherIsBetter: false },
+  green: {
+    value: (p) => ordinal(POOR_TO_GOOD, p.ugGruenversorgung),
+    higherIsBetter: true,
+  },
+  heat: {
+    value: (p) => ordinal(LOW_TO_HIGH, p.ugThermisch),
+    higherIsBetter: false,
+  },
+  kitas: { value: kitaPlacesPerChild, higherIsBetter: true },
+  transit: { value: (p) => p.transitDistanceKm, higherIsBetter: false },
+  locationQuality: { value: (p) => p.pctWohnlageGut, higherIsBetter: true },
+  hobbies: {
+    value: (p, hobbies) =>
+      hobbies.length
+        ? hobbies.filter((h) => HOBBY_FLAG[h](p)).length / hobbies.length
+        : null,
+    higherIsBetter: true,
+  },
+  nearCenter: {
+    value: (p) => p.distanceFromCenterKm,
+    higherIsBetter: false,
+  },
+}
+/** Used when no weights are given: everything except the two preference-specific factors. */
+const PLR_DEFAULT_FACTORS = (Object.keys(PLR_FACTORS) as PlrFactor[]).filter(
+  (f) => f !== "hobbies" && f !== "nearCenter",
+)
+
+/** Compact, rounded summary of a Planungsraum (what the LLM and UI usually need). */
+function plrFacts(p: PlanungsraumFull) {
+  const under6 = p.nPopulationUnder6
+  const perChild = kitaPlacesPerChild(p)
+  return {
+    rentPerM2KaltSynthetic: round(p.rentPerM2KaltSynthetic, 2),
+    /** Real 2023 listings, inherited from the dominant PLZ */
+    buyPricePerM2Real2023: round(p.buyPricePerM2Real),
+    dominantWohnlage: p.dominantWohnlage,
+    pctWohnlageGut: round(p.pctWohnlageGut, 1),
+    noise: p.ugLaerm,
+    airPollution: p.ugLuft,
+    greenSupply: p.ugGruenversorgung,
+    heat: p.ugThermisch,
+    multiBurden: p.ugMehrfachbelastungUmwelt,
+    nKitas: p.nKitas,
+    kitaPlaces: p.totalKitaCapacity,
+    kitaPlacesPer100Under6: perChild == null ? null : round(perChild * 100),
+    crimePer10kBezirk: round(p.crimeRatePer10k),
+    nearestStation: p.nearestTransitStation
+      ? `${p.nearestTransitStation} (${p.nearestTransitLine}, ${round(p.transitDistanceKm, 1)} km)`
+      : null,
+    distanceFromCenterKm: round(p.distanceFromCenterKm, 1),
+    population: p.nPopulation,
+    pctUnder6:
+      under6 != null && p.nPopulation
+        ? round((under6 / p.nPopulation) * 100, 1)
+        : null,
+    abiturSchoolsHere: p.nAbiturSchoolsInPlr,
+    // counted inside the area itself ...
+    yogaStudios: p.nYogaStudios,
+    kinderarzt: p.nKinderarzt,
+    gyms: p.nGym,
+    bouldering: p.nBouldering,
+    // ... and in its dominant PLZ, which is what the hobbies/requireKinderarzt filters use
+    yogaStudiosInPlz: p.nYogaStudiosPlz,
+    kinderarztInPlz: p.nKinderarztPlz,
+    gymsInPlz: p.nGymPlz,
+    boulderingInPlz: p.nBoulderingPlz,
+  }
+}
+
+/**
+ * Scores every Planungsraum on weighted factors (percentile ranks across all of Berlin) and
+ * returns the best matches. Areas with <100 addresses (new-build sites, parks) are skipped.
+ * Most factors are ordinal (Umweltatlas) or Bezirk-level, so ties are common; see `PLR_FACTORS`.
+ */
+export async function rankPlanungsraum(
+  input: Loose<Omit<RankPlanungsraumInput, "weights">> & {
+    weights?: Loose<NonNullable<RankPlanungsraumInput["weights"]>> | null
+  } = {},
+) {
+  const all = (await getPlanungsraeume()).filter((p) => p.nAddresses >= 100)
+  const hobbies = input.hobbies ?? []
+  const given = (
+    Object.entries(input.weights ?? {}).filter(
+      ([, w]) => w != null && w > 0,
+    ) as [PlrFactor, number][]
+  ).filter(([f]) => f !== "hobbies" || hobbies.length > 0)
+  const weights = given.length
+    ? given
+    : PLR_DEFAULT_FACTORS.map((f) => [f, 1] as [PlrFactor, number])
+  const scorers = weights.map(([f, w]) => {
+    const { value, higherIsBetter } = PLR_FACTORS[f]
+    return {
+      f,
+      w,
+      score: percentileScorer(all, (p) => value(p, hobbies), higherIsBetter),
+    }
+  })
+  const totalW = weights.reduce((s, [, w]) => s + w, 0)
+
+  let apt: Map<string, { matching: number; medianWarmmiete: number }> | null =
+    null
+  if (input.apartment) {
+    const a = input.apartment
+    const rows = await db
+      .select({
+        plrId: rentals.plrId,
+        matching: count(),
+        medianWarmmiete: median(rentals.warmmiete),
+      })
+      .from(rentals)
+      .where(
+        and(
+          a.maxWarmmiete != null
+            ? lte(rentals.warmmiete, a.maxWarmmiete)
+            : undefined,
+          a.minRooms != null ? gte(rentals.rooms, a.minRooms) : undefined,
+          a.minAreaM2 != null ? gte(rentals.areaM2, a.minAreaM2) : undefined,
+          a.balcony ? eq(rentals.hasBalcony, true) : undefined,
+        ),
+      )
+      .groupBy(rentals.plrId)
+    apt = new Map(rows.filter((r) => r.plrId).map((r) => [r.plrId!, r]))
+  }
+
+  const results = all
+    .filter(
+      (p) =>
+        (!input.bezirke?.length || input.bezirke.includes(p.bezirk as never)) &&
+        (input.maxRentPerM2 == null ||
+          (p.rentPerM2KaltSynthetic ?? Infinity) <= input.maxRentPerM2) &&
+        (input.maxTransitKm == null ||
+          (p.transitDistanceKm ?? Infinity) <= input.maxTransitKm) &&
+        (input.minDistanceFromCenterKm == null ||
+          (p.distanceFromCenterKm ?? 0) >= input.minDistanceFromCenterKm) &&
+        (input.maxDistanceFromCenterKm == null ||
+          (p.distanceFromCenterKm ?? Infinity) <=
+            input.maxDistanceFromCenterKm) &&
+        (input.outsideRing == null || input.outsideRing === !p.insideRing) &&
+        (!input.requireKita || (p.nKitas ?? 0) > 0) &&
+        (!input.requireKinderarzt || p.hasKinderarztPlz === true) &&
+        (!apt || (apt.get(p.plrId)?.matching ?? 0) > 0),
+    )
+    .map((p) => {
+      const factorScores = Object.fromEntries(
+        scorers.map(({ f, score }) => [f, Math.round(score(p) * 100)]),
+      )
+      const score =
+        scorers.reduce((s, { w, score }) => s + w * score(p), 0) / totalW
+      return {
+        plrId: p.plrId,
+        plrName: p.plrName,
+        ortsteil: p.ortsteil,
+        bezirk: p.bezirk,
+        dominantPlz: p.dominantPlz,
+        insideRing: p.insideRing,
+        lat: p.lat,
+        lon: p.lon,
+        photoUrl: p.photoUrl,
+        score: Math.round(score * 100),
+        factorScores,
+        facts: plrFacts(p),
+        matchingRentals: apt?.get(p.plrId) ?? null,
+      }
+    })
+    .sort((a, b) => b.score - a.score)
+
+  return {
+    weightsUsed: Object.fromEntries(weights),
+    candidates: results.length,
+    results: results.slice(0, clampLimit(input.limit, 20)),
+  }
+}
+
+export async function getPlanungsraumDetail(plrId: string) {
+  const profile = (await getPlanungsraeume()).find((p) => p.plrId === plrId)
+  if (!profile) return null
+  const [rentByRooms, pois] = await Promise.all([
+    db
+      .select({
+        rooms: rentals.rooms,
+        listings: count(),
+        medianWarmmiete: median(rentals.warmmiete),
+        avgRentPerM2Kalt: avgOf(rentals.rentPerM2Kalt),
+      })
+      .from(rentals)
+      .where(eq(rentals.plrId, plrId))
+      .groupBy(rentals.rooms)
+      .orderBy(rentals.rooms),
+    db
+      .select({
+        category: poiLocations.category,
+        name: poiLocations.name,
+        lat: poiLocations.lat,
+        lon: poiLocations.lon,
+      })
+      .from(poiLocations)
+      .where(eq(poiLocations.plrId, plrId))
+      .orderBy(asc(poiLocations.category), asc(poiLocations.name)),
+  ])
+  return {
+    ...profile,
+    facts: plrFacts(profile),
+    rentByRooms: rentByRooms.map((r) => ({
+      ...r,
+      medianWarmmiete: round(r.medianWarmmiete),
+      avgRentPerM2Kalt: round(r.avgRentPerM2Kalt, 2),
+    })),
+    /** Every Kita and OSM point inside the area, for the per-Kiez map */
+    pois,
+  }
+}
+
+/** Example (synthetic) rentals inside a Planungsraum; the closest available room count fills in. */
+export async function getPlanungsraumRentals(input: {
+  plrId: string
+  rooms?: number | null
+  limit?: number | null
+}) {
+  const wanted = input.rooms ?? 2
+  const rows = await db
+    .select({
+      id: rentals.id,
+      dateListed: rentals.dateListed,
+      ortsteil: rentals.ortsteil,
+      rooms: rentals.rooms,
+      areaM2: rentals.areaM2,
+      floor: rentals.floor,
+      totalFloors: rentals.totalFloors,
+      hasBalcony: rentals.hasBalcony,
+      hasLift: rentals.hasLift,
+      condition: rentals.condition,
+      buildingEra: rentals.buildingEra,
+      kaltmiete: rentals.kaltmiete,
+      warmmiete: rentals.warmmiete,
+      rentPerM2Kalt: rentals.rentPerM2Kalt,
+    })
+    .from(rentals)
+    .where(eq(rentals.plrId, input.plrId))
+    .orderBy(sql`abs(${rentals.rooms} - ${wanted})`, desc(rentals.dateListed))
+    .limit(clampLimit(input.limit ?? 3, 10))
+  return {
+    /** true when fewer than `limit` listings have exactly the wanted room count */
+    roomsRelaxed: rows.some((r) => r.rooms !== wanted),
+    results: rows,
+  }
+}
+
+/** Planungsraum polygons as a GeoJSON FeatureCollection (all 542, or only `plrIds`), for maps. */
+export async function getPlanungsraumBoundaries(plrIds?: string[] | null) {
+  const rows = await db
+    .select()
+    .from(planungsraumBoundaries)
+    .where(
+      plrIds?.length
+        ? inArray(planungsraumBoundaries.plrId, plrIds)
+        : undefined,
+    )
+    .orderBy(asc(planungsraumBoundaries.plrId))
+  return {
+    type: "FeatureCollection" as const,
+    features: rows.map((r) => ({
+      type: "Feature" as const,
+      id: r.plrId,
+      properties: { plr_id: r.plrId, plr_name: r.plrName },
+      geometry: r.geometry,
+    })),
   }
 }
 
@@ -984,6 +1349,7 @@ export async function getCrimeByArea(f: { bezirk?: string | null } = {}) {
 export type Overview = Awaited<ReturnType<typeof getOverview>>
 export type BezirkSummary = Awaited<ReturnType<typeof getBezirkSummary>>[number]
 export type KiezRow = KiezFull
+export type PlanungsraumRow = PlanungsraumFull
 
 // ─── Commute (BVG) ───────────────────────────────────────────────────────────
 

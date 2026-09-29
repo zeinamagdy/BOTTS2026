@@ -15,6 +15,7 @@ import {
   doublePrecision,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   real,
@@ -64,7 +65,7 @@ export const kiezProfiles = pgTable("kiez_profiles", {
   nSyntheticSalesListings: integer("n_synthetic_sales_listings"),
   newConstructionPricePerM2: real("new_construction_price_per_m2_avg"),
   nNewConstructionListings: integer("n_new_construction_listings"),
-  // Commute (135-station list, not full VBB network)
+  // Commute (135-station list, not full VBB network; the planungsraum table has the real VBB version)
   nearestTransitStation: text("nearest_transit_station"),
   nearestTransitLine: text("nearest_transit_line"),
   transitDistanceKm: real("transit_distance_km"),
@@ -74,7 +75,142 @@ export const kiezProfiles = pgTable("kiez_profiles", {
   nAbiturSchoolsInBezirk: integer("n_abitur_schools_in_bezirk"),
   /** AMAZING | GOOD | OK | BAD */
   abiturTierBezirk: text("abitur_tier_bezirk"),
+  // Umweltgerechtigkeit 2023/24 (Umweltatlas), from a point query at the PLZ centroid.
+  // Coarser than `planungsraum`, whose versions are the trusted ones: prefer those.
+  ugPlanungsraumNr: text("ug_planungsraum_nr"),
+  ugPlanungsraumName: text("ug_planungsraum_name"),
+  ugLaerm: text("ug_laerm"),
+  ugLuft: text("ug_luft"),
+  ugGruenversorgung: text("ug_gruenversorgung"),
+  ugThermisch: text("ug_thermisch"),
+  /** Status-Index: HIGHER = MORE ADVANTAGED, despite the name */
+  ugSozialeBenachteiligung: text("ug_soziale_benachteiligung"),
+  ugMehrfachbelastungUmwelt: text("ug_mehrfachbelastung_umwelt"),
+  ugMehrfachbelastungUmweltSozial: text("ug_mehrfachbelastung_umwelt_sozial"),
+  ugGesamtUmweltgerechtigkeitskarte: text(
+    "ug_gesamt_umweltgerechtigkeitskarte",
+  ),
 })
+
+/**
+ * One row per Planungsraum (542), Berlin's official planning geography, finer than PLZ. Built by the
+ * data repo with point-in-polygon joins. Joins to kiez_profiles through `dominantPlz`. Read the data
+ * repo's "Kiez Profile Master Table/README.md" for grain and trust levels. Highlights:
+ * - `plrId` is an 8-character STRING with leading zeros ("01100101"). Never parse it as a number.
+ * - ug_*: real, native grain. ordinal text. `ugMehrfachbelastungUmwelt` is 5-level (keine starke
+ *   Belastung → vierfach), `…Sozial` 6-level. Status-Index: HIGHER = MORE ADVANTAGED.
+ * - crime is Bezirk-level and inherited. `crimeRatePer10k` is per capita, `crimeTotalAvg` absolute.
+ * - transit is real VBB GTFS (878 stations, all lines), unlike kiez_profiles and transit_stations.
+ * - population is allocated down from PLZ×Bezirk by address share: an estimate, check `pctPopulationCoverage`.
+ * - buyPricePerM2Real is inherited from `dominantPlz`. Abitur is PLR-exact for only ~61 areas.
+ * - n_* POI counts are OpenStreetMap; the `*Plz` versions are counted per dominant PLZ.
+ */
+export const planungsraum = pgTable("planungsraum", {
+  plrId: text("plr_id").primaryKey(),
+  plrName: text("plr_name").notNull(),
+  ugLaerm: text("ug_laerm"),
+  ugLuft: text("ug_luft"),
+  ugGruenversorgung: text("ug_gruenversorgung"),
+  ugThermisch: text("ug_thermisch"),
+  ugSozialeBenachteiligung: text("ug_soziale_benachteiligung"),
+  ugMehrfachbelastungUmwelt: text("ug_mehrfachbelastung_umwelt"),
+  ugMehrfachbelastungUmweltSozial: text("ug_mehrfachbelastung_umwelt_sozial"),
+  ugGesamtUmweltgerechtigkeitskarte: text(
+    "ug_gesamt_umweltgerechtigkeitskarte",
+  ),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  nAddresses: integer("n_addresses").notNull(),
+  bezirk: text("bezirk").notNull(),
+  /** Majority PLZ of the real addresses inside this Planungsraum */
+  dominantPlz: integer("dominant_plz"),
+  pctWohnlageEinfach: real("pct_wohnlage_einfach"),
+  pctWohnlageGut: real("pct_wohnlage_gut"),
+  pctWohnlageMittel: real("pct_wohnlage_mittel"),
+  dominantWohnlage: text("dominant_wohnlage"),
+  nKitas: integer("n_kitas"),
+  totalKitaCapacity: integer("total_kita_capacity"),
+  nSchoolConstructionProjects: integer("n_school_construction_projects"),
+  nUniqueSchoolsWithProjects: integer("n_unique_schools_with_projects"),
+  totalPlannedSchoolCapacity: integer("total_planned_school_capacity"),
+  /** Abitur of schools located in this Planungsraum (lower grade = better); null for most areas */
+  abiturMeanGradePlr: real("abitur_mn_scls_plr_avg"),
+  abiturVsPeerPlr: real("abitur_performance_vs_peer_plr_avg"),
+  nAbiturSchoolsInPlr: integer("n_abitur_schools_in_plr"),
+  rentPerM2KaltSynthetic: real("rent_per_m2_kalt_avg_synthetic"),
+  nRentalListingsSynthetic: integer("n_rental_listings_synthetic"),
+  buyPricePerM2Synthetic: real("buy_price_per_m2_avg_synthetic"),
+  nSyntheticSalesListings: integer("n_synthetic_sales_listings"),
+  newConstructionPricePerM2: real("new_construction_price_per_m2_avg"),
+  nNewConstructionListings: integer("n_new_construction_listings"),
+  nearestTransitStation: text("nearest_transit_station"),
+  nearestTransitLine: text("nearest_transit_line"),
+  transitDistanceKm: real("transit_distance_km"),
+  /** Real listings, April 2023, inherited from dominantPlz */
+  buyPricePerM2Real: real("buy_price_per_m2_avg_real"),
+  nRealListings: integer("n_real_listings"),
+  /** Bezirk-level, inherited, absolute count */
+  crimeTotalAvg: real("crime_total_avg_2017_2019"),
+  abiturMeanGradeBezirk: real("abitur_mn_scls_bezirk_avg"),
+  abiturVsPeerBezirk: real("abitur_performance_vs_peer_bezirk_avg"),
+  // OpenStreetMap POI counts inside the Planungsraum
+  nYogaStudios: integer("n_yoga_studios"),
+  nKinderarzt: integer("n_kinderarzt"),
+  nGym: integer("n_gym"),
+  nBouldering: integer("n_bouldering"),
+  // …and per dominant PLZ, with a "has at least one" flag
+  nYogaStudiosPlz: integer("n_yoga_studios_plz"),
+  nKinderarztPlz: integer("n_kinderarzt_plz"),
+  nGymPlz: integer("n_gym_plz"),
+  nBoulderingPlz: integer("n_bouldering_plz"),
+  hasYogaStudiosPlz: boolean("has_yoga_studios_plz"),
+  hasKinderarztPlz: boolean("has_kinderarzt_plz"),
+  hasGymPlz: boolean("has_gym_plz"),
+  hasBoulderingPlz: boolean("has_bouldering_plz"),
+  // Population, allocated from PLZ×Bezirk by address share (estimate)
+  nPopulation: integer("n_population"),
+  nPopulationUnder6: integer("n_population_under6"),
+  nPopulation6To15: integer("n_population_6_15"),
+  nPopulation15To18: integer("n_population_15_18"),
+  nPopulation18To27: integer("n_population_18_27"),
+  nPopulation27To45: integer("n_population_27_45"),
+  nPopulation45To55: integer("n_population_45_55"),
+  nPopulation55To65: integer("n_population_55_65"),
+  nPopulation65Plus: integer("n_population_65plus"),
+  nPopulationFemale: integer("n_population_female"),
+  /** Share (%) of this area's addresses that landed in a matched population cell; 503/542 are 100 */
+  pctPopulationCoverage: real("pct_population_coverage"),
+  bezirkPopulation: integer("bezirk_population"),
+  /** Bezirk-level, inherited: crime_total_avg / (bezirk_population / 10,000) */
+  crimeRatePer10k: real("crime_rate_per_10k_2017_2019"),
+  /** Haversine distance from the centroid to Alexanderplatz */
+  distanceFromCenterKm: real("distance_from_center_km"),
+})
+
+/** Real Planungsraum polygons (MultiPolygon GeoJSON geometry), for maps and choropleths. */
+export const planungsraumBoundaries = pgTable("planungsraum_boundaries", {
+  plrId: text("plr_id").primaryKey(),
+  plrName: text("plr_name").notNull(),
+  geometry: jsonb("geometry").notNull(),
+})
+
+/**
+ * Real point locations behind the per-Planungsraum counts: every Kita plus the OSM yoga, kinderarzt,
+ * gym and bouldering points that fall inside a polygon. `category` is kita | yoga_studios |
+ * kinderarzt | gym | bouldering.
+ */
+export const poiLocations = pgTable(
+  "poi_locations",
+  {
+    id: serial("id").primaryKey(),
+    plrId: text("plr_id").notNull(),
+    category: text("category").notNull(),
+    name: text("name"),
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+  },
+  (t) => [index("poi_locations_plr_idx").on(t.plrId, t.category)],
+)
 
 /** 2025 Abitur results per school (Oberstufe only, no Grundschulen). Only 63/185 have a PLZ. */
 export const schools = pgTable(
@@ -175,8 +311,11 @@ export const rentals = pgTable(
     rentPerM2Kalt: real("rent_per_m2_kalt_eur").notNull(),
     rentIncludesWarmmiete: boolean("rent_includes_warmmiete").notNull(),
     kautionMonths: integer("kaution_months").notNull(),
+    /** Planungsraum by point-in-polygon (from the data repo's rentals_by_planungsraum.json); null for ~570 outside every polygon */
+    plrId: text("plr_id"),
   },
   (t) => [
+    index("rentals_plr_idx").on(t.plrId),
     index("rentals_plz_idx").on(t.plz),
     index("rentals_bezirk_idx").on(t.bezirk),
     index("rentals_rooms_warm_idx").on(t.rooms, t.warmmiete),
@@ -373,6 +512,8 @@ export const kiezEnrichment = pgTable("kiez_enrichment", {
 })
 
 export type KiezProfile = typeof kiezProfiles.$inferSelect
+export type Planungsraum = typeof planungsraum.$inferSelect
+export type PoiLocation = typeof poiLocations.$inferSelect
 export type KiezEnrichment = typeof kiezEnrichment.$inferSelect
 export type School = typeof schools.$inferSelect
 export type Address = typeof addresses.$inferSelect

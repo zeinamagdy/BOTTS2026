@@ -7,8 +7,10 @@ import {
   commuteInput,
   crimeInput,
   kitaInput,
+  plrRentalsInput,
   priceTrendInput,
   rankKiezInput,
+  rankPlanungsraumInput,
   rentalFilters,
   rentCheckInput,
   saleFilters,
@@ -20,10 +22,13 @@ import {
   getCommute,
   getCrimeByArea,
   getKiezDetail,
+  getPlanungsraumDetail,
+  getPlanungsraumRentals,
   getPriceTrend,
   listSchools,
   lookupAddress,
   rankKiez,
+  rankPlanungsraum,
   searchRentals,
   searchSales,
 } from "@/lib/queries"
@@ -34,9 +39,70 @@ import {
  */
 const defs = [
   {
+    name: "rank_planungsraeume",
+    description:
+      "Rank Berlin Planungsräume (542 official planning areas, finer than a PLZ) for a person's priorities: affordability, schools, safety (crime rate), noise, air, green space, heat, kitas per child, transit (full VBB network), location quality, hobbies (yoga, gym, bouldering) and closeness to the centre. Hard filters: Bezirk, rent, transit distance, distance from Alexanderplatz, outside/inside the Ring, Kita and paediatrician present, matching rental listings. Prefer this over rank_neighbourhoods for 'where should I live' questions.",
+    parameters: rankPlanungsraumInput,
+    run: async (input: z.infer<typeof rankPlanungsraumInput>) => {
+      // the model writes up ~5 areas, so don't feed it 10
+      const r = await rankPlanungsraum({ ...input, limit: input.limit ?? 5 })
+      return {
+        ...r,
+        // the map position and photo URL are for the UI, not the model
+        results: r.results.map(
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          ({ lat, lon, photoUrl, ...rest }) => rest,
+        ),
+      }
+    },
+  },
+  {
+    name: "get_planungsraum_profile",
+    description:
+      "Everything known about one Planungsraum by its 8-character plrId (from rank_planungsraeume): environment ratings, kitas, transit, crime rate, population, rent by room count, and the names of its Kitas and yoga/gym/bouldering/paediatrician spots.",
+    parameters: z.object({
+      plrId: z.string().describe("8-character id, e.g. '01100101'"),
+    }),
+    run: async ({ plrId }: { plrId: string }) => {
+      const d = await getPlanungsraumDetail(plrId)
+      if (!d) return null
+      const byCategory = Object.groupBy(d.pois, (p) => p.category)
+      return {
+        plrId: d.plrId,
+        plrName: d.plrName,
+        ortsteil: d.ortsteil,
+        bezirk: d.bezirk,
+        dominantPlz: d.dominantPlz,
+        insideRing: d.insideRing,
+        facts: d.facts,
+        rentByRooms: d.rentByRooms,
+        // names only, capped, so one profile stays small
+        places: Object.fromEntries(
+          Object.entries(byCategory).map(([category, list]) => [
+            category,
+            {
+              count: list!.length,
+              names: list!
+                .map((p) => p.name)
+                .filter(Boolean)
+                .slice(0, 8),
+            },
+          ]),
+        ),
+      }
+    },
+  },
+  {
+    name: "get_planungsraum_rentals",
+    description:
+      "A few example rental listings (synthetic) inside one Planungsraum, for a wanted room count. roomsRelaxed=true means fewer than the requested number had exactly that many rooms.",
+    parameters: plrRentalsInput,
+    run: getPlanungsraumRentals,
+  },
+  {
     name: "rank_neighbourhoods",
     description:
-      "Rank Berlin postal codes (Kieze) for a person's priorities: affordability, schools, safety, air, kitas, transit, location quality. Optionally require rental listings matching an apartment budget. Use this for 'where should I live' questions.",
+      "Rank Berlin postal codes (PLZ) for a person's priorities: affordability, schools, safety, air, kitas, transit (7 lines only), location quality, nature and cafés/playgrounds (OpenStreetMap). Use this when the person talks in PLZ or wants parks, cafés or playgrounds; otherwise prefer rank_planungsraeume.",
     parameters: rankKiezInput,
     run: rankKiez,
   },
@@ -181,6 +247,8 @@ function summarize(result: unknown): string {
       ? `${rs[0].minutes}–${rs.at(-1)!.minutes} min to ${r.to}${est}`
       : "No results"
   }
+  if (typeof r.roomsRelaxed === "boolean")
+    return `${(r.results as unknown[]).length} example listings${r.roomsRelaxed ? " (room count relaxed)" : ""}`
   if (typeof r.candidates === "number")
     return `${n.format(r.candidates)} areas scored`
   if (typeof r.verdict === "string") return r.verdict
@@ -190,5 +258,6 @@ function summarize(result: unknown): string {
   if (typeof r.total === "number") return `${n.format(r.total)} matches`
   if (Array.isArray(r.series)) return `${r.series.length} periods`
   if (typeof r.plz === "number") return `PLZ ${r.plz}`
+  if (typeof r.plrId === "string") return `Planungsraum ${r.plrName}`
   return "Done"
 }

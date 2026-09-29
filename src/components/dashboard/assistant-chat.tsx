@@ -11,6 +11,7 @@ import {
   InfoIcon,
   KeyRoundIcon,
   LoaderCircleIcon,
+  MapIcon,
   MapPinIcon,
   ScaleIcon,
   SendIcon,
@@ -44,6 +45,12 @@ type Part = { type: "text"; text: string } | ToolPart
 type Message = { role: "user" | "assistant"; parts: Part[] }
 
 const TOOL_META: Record<string, { label: string; icon: LucideIcon }> = {
+  rank_planungsraeume: { label: "Ranked planning areas", icon: MapIcon },
+  get_planungsraum_profile: { label: "Planning area profile", icon: InfoIcon },
+  get_planungsraum_rentals: {
+    label: "Example rentals in area",
+    icon: KeyRoundIcon,
+  },
   rank_neighbourhoods: { label: "Ranked neighbourhoods", icon: TrophyIcon },
   get_neighbourhood_profile: { label: "Neighbourhood profile", icon: InfoIcon },
   search_rentals: { label: "Searched rentals", icon: KeyRoundIcon },

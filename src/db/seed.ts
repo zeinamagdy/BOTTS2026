@@ -181,9 +181,117 @@ async function loadEnrichment() {
   )
 }
 
+/** Readable label per PLZ. Synthetic ortsteil labels are noisy, so only count listings whose Bezirk matches the PLZ's. */
+async function deriveOrtsteil() {
+  await db.execute(sql`
+    update kiez_profiles k set ortsteil = coalesce(
+      (select mode() within group (order by ortsteil) from rentals r where r.plz = k.plz and r.bezirk = k.bezirk),
+      (select mode() within group (order by plr_name) from addresses a where a.plz = k.plz))`)
+}
+
+/** Reloads kiez_profiles alone (and its derived ortsteil), for when the data repo's PLZ table changes. */
+async function loadProfiles() {
+  await db.execute(sql`truncate "kiez_profiles"`)
+  await load({
+    file: path.join(KIEZ, "kiez_profile_by_plz.csv"),
+    table: s.kiezProfiles,
+  })
+  await deriveOrtsteil()
+}
+
+const readJson = <T>(...parts: string[]) =>
+  JSON.parse(readFileSync(path.join(DATA_DIR, ...parts), "utf8")) as T
+
+/** Planungsraum profile (542), polygons and POI points, plus rentals.plr_id. All keyed by the string plr_id. */
+async function loadPlanungsraum() {
+  await db.execute(
+    sql`truncate "planungsraum", "planungsraum_boundaries", "poi_locations" restart identity`,
+  )
+  const flag = (v: string) => (v === "" ? "" : String(Number(v) > 0))
+  await load({
+    file: path.join(KIEZ, "planungsraum_profile.csv"),
+    table: s.planungsraum,
+    transform: (r) => ({
+      ...r,
+      has_yoga_studios_plz: flag(r.has_yoga_studios_plz),
+      has_kinderarzt_plz: flag(r.has_kinderarzt_plz),
+      has_gym_plz: flag(r.has_gym_plz),
+      has_bouldering_plz: flag(r.has_bouldering_plz),
+    }),
+  })
+
+  const { features } = readJson<{
+    features: {
+      properties: { plr_id: string; plr_name: string }
+      geometry: unknown
+    }[]
+  }>("Kiez Profile Master Table", "planungsraum_boundaries.geojson")
+  for (let i = 0; i < features.length; i += 50) {
+    await db.insert(s.planungsraumBoundaries).values(
+      features.slice(i, i + 50).map((f) => ({
+        plrId: f.properties.plr_id,
+        plrName: f.properties.plr_name,
+        geometry: f.geometry,
+      })),
+    )
+  }
+  console.log(
+    `  ${"planungsraum_boundaries".padEnd(20)} ${String(features.length).padStart(7)} rows`,
+  )
+
+  const pois = readJson<
+    {
+      plr_id: string
+      category: string
+      name: string | null
+      lat: number
+      lon: number
+    }[]
+  >("src", "data", "poi_locations.json")
+  for (let i = 0; i < pois.length; i += 2000) {
+    await db.insert(s.poiLocations).values(
+      pois.slice(i, i + 2000).map((p) => ({
+        plrId: p.plr_id,
+        // the data repo names the OSM categories after their count columns ("n_gym")
+        category: p.category.replace(/^n_/, ""),
+        name: p.name || null,
+        lat: p.lat,
+        lon: p.lon,
+      })),
+    )
+  }
+  console.log(
+    `  ${"poi_locations".padEnd(20)} ${String(pois.length).padStart(7)} rows`,
+  )
+
+  // rentals must already be loaded; they are matched by id (R000001 …)
+  const rentals = readJson<{ id: string; plr_id: string }[]>(
+    "src",
+    "data",
+    "rentals_by_planungsraum.json",
+  )
+  for (let i = 0; i < rentals.length; i += 2000) {
+    const pairs = rentals
+      .slice(i, i + 2000)
+      .map((r) => sql`(${r.id}, ${r.plr_id})`)
+    await db.execute(
+      sql`update rentals set plr_id = v.plr_id from (values ${sql.join(pairs, sql`, `)}) as v(id, plr_id) where rentals.id = v.id`,
+    )
+  }
+  console.log(
+    `  ${"rentals.plr_id".padEnd(20)} ${String(rentals.length).padStart(7)} rows`,
+  )
+}
+
 async function main() {
   if (process.argv.includes("--enrichment-only")) {
     await loadEnrichment()
+    await client.end()
+    return
+  }
+  if (process.argv.includes("--profiles-only")) {
+    await loadProfiles()
+    await loadPlanungsraum()
     await client.end()
     return
   }
@@ -208,6 +316,9 @@ async function main() {
     s.kitas,
     s.realListings2023,
     s.crimeStats,
+    s.planungsraum,
+    s.planungsraumBoundaries,
+    s.poiLocations,
   ]
   await db.execute(sql`create extension if not exists pg_trgm`)
   await db.execute(
@@ -216,10 +327,7 @@ async function main() {
     ),
   )
 
-  await load({
-    file: path.join(KIEZ, "kiez_profile_by_plz.csv"),
-    table: s.kiezProfiles,
-  })
+  await loadProfiles()
   const berlinPlz = new Set(
     (await db.select({ plz: s.kiezProfiles.plz }).from(s.kiezProfiles)).map(
       (r) => r.plz,
@@ -274,11 +382,7 @@ async function main() {
     table: s.newConstruction,
     transform: withLocation,
   })
-  // Synthetic ortsteil labels are noisy, so only count listings whose Bezirk matches the PLZ's.
-  await db.execute(sql`
-    update kiez_profiles k set ortsteil = coalesce(
-      (select mode() within group (order by ortsteil) from rentals r where r.plz = k.plz and r.bezirk = k.bezirk),
-      (select mode() within group (order by plr_name) from addresses a where a.plz = k.plz))`)
+  await deriveOrtsteil()
   await load({
     file: path.join(RE, "kiez_prices_monthly.csv"),
     table: s.kiezPricesMonthly,
@@ -352,6 +456,7 @@ async function main() {
     rename: { district: "bezirk" },
   })
 
+  await loadPlanungsraum()
   await loadEnrichment()
 
   console.log(`Done in ${((Date.now() - t0) / 1000).toFixed(1)}s`)

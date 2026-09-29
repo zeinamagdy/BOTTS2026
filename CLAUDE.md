@@ -26,6 +26,7 @@ npm run db:up            # start Postgres container (berlin-housing-db, port 543
 npm run db:push          # sync src/db/schema.ts -> DB (no migration files). Add `-- --force` to skip prompts
 npm run data:fetch       # clone/update the data repo into data/tech-battle (git-ignored)
 npm run db:seed          # wipes + reloads all tables from the CSVs (~1 min, ~500k rows)
+npm run db:refresh-profiles  # reloads only kiez_profiles + planungsraum* + poi_locations + rentals.plr_id (seconds); use after data:fetch when only the profile tables changed
 npm run db:setup         # data:fetch + db:push --force + db:seed (fresh machine)
 npm run data:osm         # re-fetch OSM green/water/parks/cafés → data/derived/osm-amenities.json (slow, Overpass is often busy)
 npm run data:photos      # re-fetch Wikimedia Commons photos → data/derived/kiez-photos.json
@@ -50,7 +51,7 @@ src/app/api/chat/route.ts         POST, OpenAI tool-calling loop, streams NDJSON
 src/components/ui/                shadcn components (generated; ok to edit)
 src/components/dashboard/         kpi-cards, rent-chart, kiez-map(+ -lazy), district-table, assistant-chat
 src/components/theme-*.tsx        next-themes provider + toggle
-src/db/schema.ts                  11 tables mirroring the data repo CSVs (see "Data")
+src/db/schema.ts                  14 tables mirroring the data repo CSVs (see "Data")
 src/db/index.ts                   drizzle client (global pool reuse in dev)
 src/db/seed.ts                    CSV loader: auto-maps headers → columns, derives plz/wohnlage for listings
 src/lib/env.ts                    zod-validated env ("server-only")
@@ -78,7 +79,7 @@ data/tech-battle/                 cloned data repo (git-ignored, never commit it
 
 - Source: the team's data repo **github.com/esakovaa/tech-battle** (by a teammate). `npm run data:fetch` clones it into `data/tech-battle/`. **Don't commit the CSVs here** (the user's decision); that repo is the source of truth. Re-run `data:fetch` + `db:seed` when it changes.
 - Read `data/tech-battle/Kiez Profile Master Table/README.md` for per-column trust levels.
-- Tables and row counts (all match the CSVs):
+- Tables and row counts (all match the CSVs). The data repo also ships a teammate's Next.js app and design drafts (`src/`, `design/wurzelraum/`, `photos/`); they are not ours, and `tsconfig.json` excludes `data/tech-battle`.
 
   | Table | Rows | Real? | Notes |
   |---|---|---|---|
@@ -93,9 +94,19 @@ data/tech-battle/                 cloned data repo (git-ignored, never commit it
   | `transit_stations` | 135 | real names | only 7 lines (see below) |
   | `real_listings_2023` | 4,932 | real | immowelt sale listings, 10 non-Berlin zipcodes dropped, junk years/floors nulled |
   | `crime_stats` | 1,200 | real | per Bezirksregion, 2012–2019 |
+| `planungsraum` | 542 | mixed | Planungsraum (PLR) profile, the finer unit, key `plr_id` (**8-char string with leading zeros, never a number**). Joins to `kiez_profiles` via `dominant_plz`. See the notes below |
+| `planungsraum_boundaries` | 542 | real | `plr_id` + MultiPolygon GeoJSON geometry (jsonb, ~6 MB): the choropleth source |
+| `poi_locations` | 3,638 | real (Kitas, OSM) | one point per Kita/yoga_studios/kinderarzt/gym/bouldering with its `plr_id` (categories stripped of the `n_` prefix) |
 | `kiez_enrichment` | 193 | real (OSM / Commons) | ours, from `data/derived/`: green/water share, parks, cafés, playgrounds within 1 km of the PLZ centroid; one photo per PLZ (185/193) with author + license |
 
 - **Real vs synthetic:** all listings and price trends are synthetic, with € levels ~25–40% below the real market. Use them for relative comparison. `buyPricePerM2Real` (2023) is the real price signal.
+- **Planungsraum table** (added 2026-09-29; the data repo builds it with point-in-polygon joins):
+  - Native-grain Umweltgerechtigkeit (`ug_*`, ordinal text; `ug_soziale_benachteiligung` is a Status-Index where **higher = more advantaged**; `ug_mehrfachbelastung_umwelt` is 5-level, `…_sozial` 6-level), OSM POI counts (`n_yoga_studios`, `n_kinderarzt`, `n_gym`, `n_bouldering`, plus `*_plz` counts and `has_*_plz` flags), population by age (**allocated** from PLZ×Bezirk by address share: an estimate, check `pct_population_coverage`), `crime_rate_per_10k_2017_2019` (per capita but still Bezirk-level), `distance_from_center_km` (to Alexanderplatz), and **real VBB GTFS transit** (878 stations, all lines).
+  - Limits: `buy_price_per_m2_avg_real` is inherited from `dominant_plz`; Abitur is PLR-exact for only ~61 areas (the Bezirk fallback columns are complete); `new_construction_price_per_m2_avg` is null for 421.
+  - `rentals.plr_id` is matched by polygon from the data repo's `rentals_by_planungsraum.json` (29,431 of 30,000; 569 are null). It is separate from the nearest-address `plz`/`plr_name` we derive.
+  - `kiez_profiles` gained 10 `ug_*` point-query columns; prefer the PLR versions. `n_school_construction_projects` was corrected upstream (now sums to 370).
+  - The PLZ transit columns and `transit_stations` are still the 135-station, 7-line list. Real VBB data exists only in `planungsraum`.
+  - PLR reads live in `queries.ts` under "Planungsraum" (see the Query API table). Three LLM tools wrap them: `rank_planungsraeume`, `get_planungsraum_profile`, `get_planungsraum_rentals`.
 - **Derived in the seed (not in the CSVs):**
   - Synthetic listings get `plz`, `wohnlage` and `plr_name` from their **nearest real address** (grid index over the 400k addresses). This beat the upstream nearest-centroid approach and enables the rent-fairness check.
   - `kiez_profiles.ortsteil`: a readable label per PLZ. It's the most common listing Ortsteil **among listings whose Bezirk matches the PLZ's Bezirk**, falling back to the most common Planungsraum. Without the Bezirk filter, 10439 came out as "Gesundbrunnen" instead of Prenzlauer Berg.
@@ -124,6 +135,11 @@ All take plain objects. Filter fields may be `null` or missing, and both mean "n
 | `getHomeHighlights()` | landing page: top 3 family Kieze outside the Ring (min Abitur tier OK) with photos, plus counts |
 | `getCommute({ to, plzs, departAt })` | door-to-door ÖPNV minutes from ≤10 PLZ centroids to a place, next weekday 08:00 via BVG. If the API is down, geocodes locally (address → station → street) and returns `estimated: true` |
 | `rankKiez({ weights, bezirke, maxRentPerM2, minAbiturTier, maxTransitKm, apartment, limit })` | **the core "find my Kiez" feature.** Weights 0–5 for affordability, schools, safety, air, kitas, transit, locationQuality, nature (green share + ½ water share), amenities (cafés + playgrounds). `outsideRing` true/false filters by the S-Bahn Ring. Each factor is scored as a percentile rank across Berlin, so ties (Bezirk-level values) score equally and missing values count 0.5. PLZs with <100 addresses are skipped. `apartment` keeps only PLZs with matching rentals and returns their count and median warm rent. |
+| `getPlanungsraeume()` | all 542 PLR rows, plus `ortsteil` + photo of the dominant PLZ and `insideRing` (centroid vs the S-Ring) |
+| `rankPlanungsraum({ weights, hobbies, bezirke, maxRentPerM2, maxTransitKm, min/maxDistanceFromCenterKm, outsideRing, requireKita, requireKinderarzt, apartment, limit })` | the PLR version of `rankKiez`. Weights 0–5 for affordability, schools (PLR-exact Abitur, else Bezirk), safety (crime **rate**), noise, air, green, heat (Umweltatlas ordinals), kitas (places per child under 6), transit (real VBB), locationQuality, hobbies (share of the chosen yoga/gym/bouldering present in the PLZ), nearCenter. No weights = equal over everything except hobbies and nearCenter. Same percentile scoring and ≥100-address cut-off as `rankKiez`. `apartment` matches through `rentals.plr_id`. Deliberately **no factor on the social Status-Index** (it is a wealth proxy). Ties are common (ordinal and Bezirk-level inputs), so many areas share factor scores |
+| `getPlanungsraumDetail(plrId)` | full row + `facts`, rent by room count (via `rentals.plr_id`) and every Kita/OSM point (`pois`). `null` for an unknown id. `plrId` is a string |
+| `getPlanungsraumRentals({ plrId, rooms, limit })` | example synthetic rentals, exact room count first, closest counts fill in (`roomsRelaxed` says so) |
+| `getPlanungsraumBoundaries(plrIds?)` | GeoJSON FeatureCollection of PLR polygons (all 542 ≈ 6 MB, so pass `plrIds` to show only results) |
 | `getKiezDetail(plz)` | PLZ detail page: full profile, rent by room count, top schools in the Bezirk, largest kitas, 3 nearest stations, real 2023 sale prices |
 | `searchRentals(filters)` / `searchSales({ kind: "resale" \| "new_build", … })` | listing search: bezirke, plz, ortsteil, rooms, area, price, balcony, wohnlage, `near {lat, lon, radiusKm}`, `transitLines` + `maxStationKm` (default 1 km), sort. Returns total, median and rows with `nearestStation` |
 | `lookupAddress(street, houseNumber?)` | official Wohnlage per address. Tolerates "Str."/"strasse" and spaces vs hyphens ("Karl Marx Allee"), and suggests spellings via trigram similarity |
@@ -142,7 +158,8 @@ Test queries without the browser: write a `.mts` script (top-level await) that l
   - Calls `openai.responses.create({ stream: true, instructions, input, tools, previous_response_id })`. The model can call several tools in parallel.
   - `previous_response_id` relies on OpenAI storing responses (the default `store: true`). If the key's org has zero data retention, switch to passing the output items back manually.
   - Collects `function_call` items from `response.output_item.done`, runs them via `runTool()`, then continues with `function_call_output` items plus `previous_response_id`.
-  - The system prompt holds the **data caveats** (synthetic vs real, Bezirk-level crime/Abitur, the 7 transit lines). Keep it in sync when the data changes.
+  - The system prompt holds the **data caveats** (synthetic vs real, Bezirk-level crime/Abitur, the 7 transit lines for the PLZ tools vs full VBB for the PLR tools, ordinal Umweltatlas ratings, allocated population, OSM hobby gaps). Keep it in sync when the data changes. It tells the model to start "where should I live" questions with `rank_planungsraeume` and to fall back to the PLZ `rank_neighbourhoods` for PLZ talk or parks/cafés/playgrounds (those exist only per PLZ).
+  - The PLR tool wrappers in `tools.ts` slim the output for the model: `rank_planungsraeume` drops `lat`/`lon`/`photoUrl`, and `get_planungsraum_profile` returns only names (max 8 per category) plus counts instead of every POI point.
 - **Wire format:** newline-delimited JSON `ChatEvent`s from `src/lib/chat-events.ts`: `{type:"text",delta}`, `{type:"tool_call",id,name,args}`, `{type:"tool_result",id,ok,summary,ms}`. Errors arrive as text deltas starting with "⚠️". The client (`assistant-chat.tsx`) parses lines into message `parts` (text through `<Streamdown>`, tools as expandable rows showing label, summary, ms and args). Only text parts are sent back as history.
 - Adding a tool:
   1. Write the query in `queries.ts`.
@@ -161,7 +178,7 @@ Test queries without the browser: write a `.mts` script (top-level await) that l
 - Wiring patterns:
   - Read-only screens (PLZ detail, district overview): server component + `await connection()` + query call.
   - Interactive filtering (Kiez finder with weight sliders, listing search): a Server Action or a small route handler that validates with the **same Zod schema** from `filters.ts` (`rankKiezInput`, `rentalFilters`, …) and calls the query. Keep filter state in the URL (`searchParams`) so results are shareable and the pitch demo is reproducible.
-  - Map: `kiez-map.tsx` shows the 193 PLZ centroids. A choropleth needs PLZ boundary GeoJSON (daten.berlin.de), which isn't in the data repo yet.
+  - Map: `kiez-map.tsx` shows the 193 PLZ centroids. A choropleth can use `planungsraum_boundaries` (PLR polygons; there are no PLZ polygons).
 - The Figma workflow is below. Map the palette to `--chart-N` first, so the map and charts get real colours.
 
 ## Figma design workflow
@@ -205,8 +222,8 @@ Test queries without the browser: write a `.mts` script (top-level await) that l
 ## Status
 
 - **Done:**
-  - Data repo integrated: 11 tables, all row counts match the CSVs.
-  - Query layer and 10 LLM tools, all verified with real OpenAI responses: rank neighbourhoods, profile, search rentals and sales (with the geometry-based transit line filter), address lookup, rent fairness check, price trend, kitas, schools, crime.
+  - Data repo integrated: 14 tables, all row counts match the CSVs (incl. Planungsraum profile, boundaries and POI points).
+  - Query layer and 13 LLM tools (10 PLZ + 3 Planungsraum), all verified with real OpenAI responses: rank neighbourhoods, profile, search rentals and sales (with the geometry-based transit line filter), address lookup, rent fairness check, price trend, kitas, schools, crime.
   - Chat UI shows each tool call.
   - Placeholder dashboard rewired to the real data.
   - Build, lint and typecheck are clean.
@@ -217,7 +234,8 @@ Test queries without the browser: write a `.mts` script (top-level await) that l
   - Deploy (above).
 - **Ideas, not started:**
   - Add a `transitLines` filter to `rankKiez`.
-  - VBB GTFS stations for full network coverage.
-  - Per-capita crime (needs population data; the Amt für Statistik link in the data README is dead).
-  - PLZ boundary GeoJSON for a choropleth.
+  - Use the VBB network for transit filters (real stations exist in `planungsraum`; `transit_stations` is still 7 lines).
+  - Build the Kiez finder on `rankPlanungsraum` (weight sliders, filters in the URL, results + PLR polygons on the map).
+  - Optional PLZ×Bezirk population table (`DATA  SOURCES/berlin_population_by_plz_bezirk.csv`), skipped on purpose: PLR already has allocated population, the vintage is unknown and 3 PLZs are missing.
+  - Choropleth from `planungsraum_boundaries`.
   - If the transit `exists` filter gets slow, add a bounding-box pre-filter (currently 0.1–0.6 s).
