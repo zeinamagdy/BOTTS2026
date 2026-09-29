@@ -114,7 +114,13 @@ export default async function ResultsPage({
       </ResultsShell>
     )
 
+  // Not shown to the person: the commute check just leaves the place out
   const missing = data.places.filter((p) => !p.foundAs)
+  if (missing.length)
+    console.warn(
+      "Finder: couldn't geocode, left out of the commute check:",
+      missing.map((p) => p.address),
+    )
 
   return (
     <ResultsShell>
@@ -142,12 +148,6 @@ export default async function ResultsPage({
             </Link>
           </li>
         </ul>
-        {missing.length > 0 && (
-          <p className="text-destructive text-sm">
-            Couldn&apos;t find {missing.map((p) => `“${p.address}”`).join(", ")}{" "}
-            in Berlin, so it is not part of the commute check.
-          </p>
-        )}
       </div>
 
       {data.results.length > 0 ? (

@@ -4,19 +4,28 @@ import "server-only"
  * Minimal client for the public BVG HAFAS REST API (v6.bvg.transport.rest, no
  * key, ~100 req/min). It is a volunteer-run service and is sometimes down, so
  * every call returns null on failure and callers fall back to an estimate.
+ * Nothing depends on it: addresses are geocoded from our own data first, and
+ * live journeys only refine the straight-line estimate.
  */
 const BASE = process.env.BVG_API_URL ?? "https://v6.bvg.transport.rest"
-const TIMEOUT_MS = 8000
+const TIMEOUT_MS = 2500
+/** After a failure, skip BVG this long instead of waiting for a timeout on every call */
+const COOL_OFF_MS = 5 * 60_000
+let downUntil = 0
 
 async function api<T>(path: string, params: Record<string, string>) {
+  if (Date.now() < downUntil) return null
   try {
     const res = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { "user-agent": "KiezConcierge/0.1 (hackathon demo)" },
       next: { revalidate: 86_400 },
     })
+    if (res.status >= 500 || res.status === 429)
+      downUntil = Date.now() + COOL_OFF_MS
     return res.ok ? ((await res.json()) as T) : null
   } catch {
+    downUntil = Date.now() + COOL_OFF_MS
     return null
   }
 }

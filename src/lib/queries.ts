@@ -1121,6 +1121,8 @@ export async function searchSales(f: Loose<SaleFilters> = {}) {
 export async function lookupAddress(
   street: string,
   houseNumber?: string | null,
+  /** Preferred when the street name exists in several postcodes */
+  plz?: number | null,
 ) {
   const s = normStreet(street)
   const hnr = houseNumber
@@ -1135,6 +1137,7 @@ export async function lookupAddress(
       .select()
       .from(addresses)
       .where(and(onStreet, eq(addresses.hnr, hnr)))
+      .orderBy(plz ? sql`${addresses.plz} = ${plz} desc` : sql`1`)
       .limit(1)
     if (hit) {
       const profile = await getKiezFull(hit.plz)
@@ -1442,32 +1445,63 @@ export type PlanungsraumRow = PlanungsraumFull
 // ─── Commute (BVG) ───────────────────────────────────────────────────────────
 
 /** Geocode from our own data when the BVG API is down: address, station or PLZ. */
+/**
+ * "Harzer Str. 42, 12059 Berlin" → street "Harzer Str.", number "42", PLZ 12059.
+ * Also takes "Friedrichstraße 100", "Harzer Str. 42 Berlin" and "12059".
+ */
+function parseAddress(query: string) {
+  const plzMatch = query.match(/\b(1[0-4]\d{3})\b/)
+  const rest = query
+    .replace(/\b1[0-4]\d{3}\b/, " ")
+    .replace(/\b(berlin|deutschland|germany)\b/gi, " ")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean)[0]
+    ?.replace(/\s+/g, " ")
+  const m = rest?.match(/^(.+?)\s+(\d+\s*[a-z]?)$/i)
+  return {
+    street: m ? m[1] : (rest ?? ""),
+    houseNumber: m ? m[2] : null,
+    plz: plzMatch ? Number(plzMatch[1]) : null,
+  }
+}
+
+/** Offline geocoder for when the BVG API is down: our 400k addresses, then stations, streets, PLZ. */
 async function geocodeLocal(query: string): Promise<Place | null> {
   const q = query.trim()
-  if (/^\d{5}$/.test(q)) {
-    const p = await getKiezFull(Number(q))
-    return p ? { lat: p.lat, lon: p.lon, name: `PLZ ${q}` } : null
-  }
-  const m = q.match(/^(.+?)\s+(\d+\s*[a-z]?)$/i)
-  if (m) {
-    const r = await lookupAddress(m[1], m[2])
+  const { street, houseNumber, plz } = parseAddress(q)
+  if (street && houseNumber) {
+    const r = await lookupAddress(street, houseNumber, plz)
     if (r.found === "address")
       return { lat: r.address.lat, lon: r.address.lon, name: q }
   }
-  const [station] = await db
-    .select()
-    .from(transitStations)
-    .where(sql`${transitStations.stationName} ilike ${`%${q}%`}`)
-    .limit(1)
-  if (station)
-    return { lat: station.lat, lon: station.lon, name: station.stationName }
-  const [street] = await db
-    .select({ lat: avgOf(addresses.lat), lon: avgOf(addresses.lon) })
-    .from(addresses)
-    .where(
-      eq(streetKey(addresses.strasse), normStreet(q).replace(/[\s-]/g, "")),
-    )
-  return street?.lat ? { lat: street.lat, lon: street.lon, name: q } : null
+  if (street) {
+    const [station] = await db
+      .select()
+      .from(transitStations)
+      .where(sql`${transitStations.stationName} ilike ${`%${street}%`}`)
+      .limit(1)
+    if (station)
+      return { lat: station.lat, lon: station.lon, name: station.stationName }
+    const [onStreet] = await db
+      .select({ lat: avgOf(addresses.lat), lon: avgOf(addresses.lon) })
+      .from(addresses)
+      .where(
+        and(
+          eq(
+            streetKey(addresses.strasse),
+            normStreet(street).replace(/[\s-]/g, ""),
+          ),
+          plz ? eq(addresses.plz, plz) : undefined,
+        ),
+      )
+    if (onStreet?.lat) return { lat: onStreet.lat, lon: onStreet.lon, name: q }
+  }
+  if (plz) {
+    const p = await getKiezFull(plz)
+    if (p) return { lat: p.lat, lon: p.lon, name: `PLZ ${plz}` }
+  }
+  return null
 }
 
 const straightKm = (
@@ -1482,15 +1516,17 @@ const estimateTransitMinutes = (km: number) => Math.round(14.6 + 2.6 * km)
 /** 75th percentile of (live − estimate) in the same fit */
 const ESTIMATE_MARGIN_MIN = 6
 
+/** Our own address data first; BVG only for what it can't place (landmarks, POIs). */
+const geocode = async (query: string) =>
+  (await geocodeLocal(query)) ?? (await bvgGeocode(query))
+
 /**
  * Door-to-door public transport time from each candidate PLZ (centroid) to a
- * work place, next weekday morning. Uses the live BVG API; when it is down,
- * falls back to a straight-line estimate flagged `estimated: true`.
+ * work place, next weekday morning. Live BVG journeys when the API answers,
+ * otherwise a straight-line estimate flagged `estimated: true`.
  */
 export async function getCommute({ to, plzs, departAt }: CommuteInput) {
-  const live = await bvgGeocode(to)
-  // No geocode answer usually means the API is down: don't wait for journeys too
-  const dest = live ?? (await geocodeLocal(to))
+  const dest = await geocode(to)
   if (!dest) return { error: `Could not find "${to}" in Berlin` }
   const profiles = await getKiezProfiles()
   const homes = [...new Set(plzs)]
@@ -1500,7 +1536,7 @@ export async function getCommute({ to, plzs, departAt }: CommuteInput) {
   const results = await Promise.all(
     homes.map(async (p) => {
       const from = { lat: p.lat, lon: p.lon, name: `${p.plz} Berlin` }
-      const j = live ? await bvgJourney(from, dest, departAt) : null
+      const j = await bvgJourney(from, dest, departAt)
       const km = straightKm(p, dest)
       return {
         plz: p.plz,
@@ -1537,14 +1573,9 @@ export async function findKiezMatches(input: {
   const [{ weightsUsed, results }, places] = await Promise.all([
     scorePlanungsraeume(input.rank),
     Promise.all(
-      input.places.slice(0, 3).map(async (pl) => {
-        const live = await bvgGeocode(pl.address)
-        return {
-          ...pl,
-          live: live != null,
-          at: live ?? (await geocodeLocal(pl.address)),
-        }
-      }),
+      input.places
+        .slice(0, 3)
+        .map(async (pl) => ({ ...pl, at: await geocode(pl.address) })),
     ),
   ])
   const found = places.filter((p) => p.at != null)
@@ -1582,11 +1613,10 @@ export async function findKiezMatches(input: {
       : [...safe, ...within.filter((r) => !safe.includes(r))]
   ).slice(0, limit * 2)
 
-  // Live journeys only for the pool, and only if the API answered the geocode
+  // Live journeys refine the estimate for the pool (instant null while BVG is down)
   await Promise.all(
     pool.flatMap((r) =>
       r.commutes.map(async (c, i) => {
-        if (!found[i].live) return
         const j = await bvgJourney(
           { lat: r.lat, lon: r.lon, name: r.plrName },
           found[i].at!,
