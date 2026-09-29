@@ -11,30 +11,57 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
+import { cn } from "@/lib/utils"
 
 const LINKS = [
-  { href: "#how-it-works", label: "How it works" },
-  { href: "#hidden-gems", label: "For people" },
-  { href: "#about", label: "About" },
+  { href: "/#how-it-works", label: "How it works" },
+  { href: "/#hidden-gems", label: "For people" },
+  { href: "/#about", label: "About" },
 ]
 
-function Logo() {
+function Logo({ overlay }: { overlay: boolean }) {
   return (
-    <Link href="/" className="flex items-center gap-2 text-white">
+    <Link
+      href="/"
+      className={cn(
+        "flex items-center gap-2",
+        overlay ? "text-white" : "text-heading",
+      )}
+    >
       {/* Placeholder mark from the design, until the real logo exists */}
-      <span className="h-[47px] w-14 rounded-full border-5 border-white" />
+      <span
+        className={cn(
+          "h-[47px] w-14 rounded-full border-5",
+          overlay ? "border-white" : "border-heading",
+        )}
+      />
       <span className="font-bold">Kiez Concierge</span>
     </Link>
   )
 }
 
-/** Transparent navbar that sits on top of the hero photo. */
-export function SiteNav() {
+/**
+ * `overlay`: transparent, white, on top of the hero photo (landing page).
+ * `page`: dark text in the page flow, without the CTA (the finder screens).
+ */
+export function SiteNav({ tone = "overlay" }: { tone?: "overlay" | "page" }) {
+  const overlay = tone === "overlay"
+  const onPhoto = overlay && "text-white hover:bg-white/15 hover:text-white"
   return (
-    <header className="absolute inset-x-0 top-0 z-20 px-4 py-4 sm:px-6">
+    <header
+      className={cn(
+        "z-20 px-4 py-4 sm:px-6",
+        overlay ? "absolute inset-x-0 top-0" : "mx-auto w-full max-w-[1184px]",
+      )}
+    >
       <nav className="flex items-center justify-between gap-4">
-        <Logo />
-        <div className="hidden items-center gap-6 font-medium text-white md:flex">
+        <Logo overlay={overlay} />
+        <div
+          className={cn(
+            "hidden items-center gap-6 font-medium md:flex",
+            overlay ? "text-white" : "text-heading ml-auto",
+          )}
+        >
           {LINKS.map((l) => (
             <a key={l.href} href={l.href} className="hover:underline">
               {l.label}
@@ -42,8 +69,10 @@ export function SiteNav() {
           ))}
         </div>
         <div className="flex items-center gap-1">
-          <ThemeToggle className="text-white hover:bg-white/15 hover:text-white" />
-          <FindKiezButton size="pill" className="hidden sm:inline-flex" />
+          <ThemeToggle className={cn(onPhoto)} />
+          {overlay && (
+            <FindKiezButton size="pill" className="hidden sm:inline-flex" />
+          )}
           <Sheet>
             <SheetTrigger
               render={
@@ -51,7 +80,7 @@ export function SiteNav() {
                   variant="ghost"
                   size="icon"
                   aria-label="Open menu"
-                  className="text-white hover:bg-white/15 hover:text-white md:hidden"
+                  className={cn(onPhoto, "md:hidden")}
                 />
               }
             >

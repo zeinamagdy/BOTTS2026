@@ -11,3 +11,4 @@ export function getOpenAI() {
 
 // Override with OPENAI_MODEL in .env.local, e.g. "gpt-5.4-mini" for cheaper, high-volume calls.
 export const MODEL = env.OPENAI_MODEL
+export const FAST_MODEL = env.OPENAI_FAST_MODEL

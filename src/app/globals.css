@@ -18,6 +18,9 @@
   --font-geist: var(--font-geist-sans);
   --color-brand-100: var(--brand-100);
   --color-brand-200: var(--brand-200);
+  --color-brand-500: var(--brand-500);
+  --color-subtle: var(--subtle);
+  --color-faint: var(--faint);
   --color-brand-600: var(--brand-600);
   --color-brand-950: var(--brand-950);
   --color-bubble: var(--bubble);
@@ -93,8 +96,12 @@
   /* Figma brand ramp + semantic helpers */
   --brand-100: #ffedd5;
   --brand-200: #ffd6a6;
+  --brand-500: #f97316;
   --brand-600: #ea580c;
   --brand-950: #431407;
+  /* theme/500 and theme/400 greys: form labels and unselected options */
+  --subtle: #737373;
+  --faint: #a3a3a3;
   --bubble: #ffd6a6;
   --bubble-foreground: #171717;
   --chip: #e5e5e5;
@@ -138,8 +145,11 @@
   --chart-5: #fed7aa;
   --brand-100: #ffedd5;
   --brand-200: #ffd6a6;
+  --brand-500: #f97316;
   --brand-600: #ea580c;
   --brand-950: #431407;
+  --subtle: #a8a29e;
+  --faint: #78716c;
   --bubble: #7c2d12;
   --bubble-foreground: #ffedd5;
   --chip: #292524;

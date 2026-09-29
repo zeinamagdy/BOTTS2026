@@ -139,10 +139,19 @@ export const rankPlanungsraumInput = z.object({
         "Share of the chosen `hobbies` available in the PLZ. Ignored without `hobbies`",
       ),
       nearCenter: weight.describe("Close to Alexanderplatz"),
+      parks: weight.describe(
+        "Many parks within 1 km (OpenStreetMap, PLZ-level: shared by all areas of the dominant PLZ)",
+      ),
+      cafes: weight.describe(
+        "Many cafés within 1 km (OpenStreetMap, PLZ-level)",
+      ),
+      playgrounds: weight.describe(
+        "Many playgrounds within 1 km (OpenStreetMap, PLZ-level)",
+      ),
     })
     .nullable()
     .describe(
-      "Importance 0–5 per factor. Omitted factors count 0; all omitted = equal weights over all factors except hobbies and nearCenter",
+      "Importance 0–5 per factor. Omitted factors count 0; all omitted = equal weights over all factors except hobbies, nearCenter, parks, cafes and playgrounds",
     ),
   hobbies: z
     .array(z.enum(HOBBIES))

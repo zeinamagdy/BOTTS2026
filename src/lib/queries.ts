@@ -500,9 +500,13 @@ export async function getKiezDetail(plz: number) {
 
 // ─── Planungsraum (the finer unit, 542 areas) ────────────────────────────────
 
-/** A Planungsraum row plus the readable label and photo of its dominant PLZ. */
+/** A Planungsraum row plus the readable label, photo and OSM counts of its dominant PLZ. */
 type PlanungsraumFull = Planungsraum & {
   ortsteil: string | null
+  /** OSM, within 1 km of the dominant PLZ's centroid: shared by every area of that PLZ */
+  parks1kmPlz: number | null
+  cafes1kmPlz: number | null
+  playgrounds1kmPlz: number | null
   photoUrl: string | null
   photoAuthor: string | null
   photoLicense: string | null
@@ -520,6 +524,9 @@ export async function getPlanungsraeume(): Promise<PlanungsraumFull[]> {
         photoAuthor: kiezEnrichment.photoAuthor,
         photoLicense: kiezEnrichment.photoLicense,
         photoPage: kiezEnrichment.photoPage,
+        parks1kmPlz: kiezEnrichment.parks1km,
+        cafes1kmPlz: kiezEnrichment.cafes1km,
+        playgrounds1kmPlz: kiezEnrichment.playgrounds1km,
       })
       .from(planungsraum)
       .leftJoin(kiezProfiles, eq(kiezProfiles.plz, planungsraum.dominantPlz))
@@ -559,7 +566,7 @@ const kitaPlacesPerChild = (p: Planungsraum) =>
 const PLR_FACTORS: Record<
   PlrFactor,
   {
-    value: (p: Planungsraum, hobbies: Hobby[]) => number | null
+    value: (p: PlanungsraumFull, hobbies: Hobby[]) => number | null
     higherIsBetter: boolean
   }
 > = {
@@ -600,10 +607,15 @@ const PLR_FACTORS: Record<
     value: (p) => p.distanceFromCenterKm,
     higherIsBetter: false,
   },
+  // PLZ-level (every area of a PLZ shares the value), see PlanungsraumFull
+  parks: { value: (p) => p.parks1kmPlz, higherIsBetter: true },
+  cafes: { value: (p) => p.cafes1kmPlz, higherIsBetter: true },
+  playgrounds: { value: (p) => p.playgrounds1kmPlz, higherIsBetter: true },
 }
-/** Used when no weights are given: everything except the two preference-specific factors. */
+/** Used when no weights are given: the area's own factors, without the preference-specific and PLZ-level ones. */
 const PLR_DEFAULT_FACTORS = (Object.keys(PLR_FACTORS) as PlrFactor[]).filter(
-  (f) => f !== "hobbies" && f !== "nearCenter",
+  (f) =>
+    !["hobbies", "nearCenter", "parks", "cafes", "playgrounds"].includes(f),
 )
 
 /** Compact, rounded summary of a Planungsraum (what the LLM and UI usually need). */
@@ -645,7 +657,14 @@ function plrFacts(p: PlanungsraumFull) {
     kinderarztInPlz: p.nKinderarztPlz,
     gymsInPlz: p.nGymPlz,
     boulderingInPlz: p.nBoulderingPlz,
+    parks1kmPlz: p.parks1kmPlz,
+    cafes1kmPlz: p.cafes1kmPlz,
+    playgrounds1kmPlz: p.playgrounds1kmPlz,
   }
+}
+
+type RankPlrInput = Loose<Omit<RankPlanungsraumInput, "weights">> & {
+  weights?: Loose<NonNullable<RankPlanungsraumInput["weights"]>> | null
 }
 
 /**
@@ -653,11 +672,17 @@ function plrFacts(p: PlanungsraumFull) {
  * returns the best matches. Areas with <100 addresses (new-build sites, parks) are skipped.
  * Most factors are ordinal (Umweltatlas) or Bezirk-level, so ties are common; see `PLR_FACTORS`.
  */
-export async function rankPlanungsraum(
-  input: Loose<Omit<RankPlanungsraumInput, "weights">> & {
-    weights?: Loose<NonNullable<RankPlanungsraumInput["weights"]>> | null
-  } = {},
-) {
+export async function rankPlanungsraum(input: RankPlrInput = {}) {
+  const { weightsUsed, results } = await scorePlanungsraeume(input)
+  return {
+    weightsUsed,
+    candidates: results.length,
+    results: results.slice(0, clampLimit(input.limit, 20)),
+  }
+}
+
+/** Every Planungsraum that passes the filters, best score first (`rankPlanungsraum` without the limit). */
+async function scorePlanungsraeume(input: RankPlrInput) {
   const all = (await getPlanungsraeume()).filter((p) => p.nAddresses >= 100)
   const hobbies = input.hobbies ?? []
   const given = (
@@ -736,7 +761,14 @@ export async function rankPlanungsraum(
         insideRing: p.insideRing,
         lat: p.lat,
         lon: p.lon,
-        photoUrl: p.photoUrl,
+        photo: p.photoUrl
+          ? {
+              url: p.photoUrl,
+              author: p.photoAuthor,
+              license: p.photoLicense,
+              page: p.photoPage,
+            }
+          : null,
         score: Math.round(score * 100),
         factorScores,
         facts: plrFacts(p),
@@ -745,11 +777,7 @@ export async function rankPlanungsraum(
     })
     .sort((a, b) => b.score - a.score)
 
-  return {
-    weightsUsed: Object.fromEntries(weights),
-    candidates: results.length,
-    results: results.slice(0, clampLimit(input.limit, 20)),
-  }
+  return { weightsUsed: Object.fromEntries(weights), results }
 }
 
 export async function getPlanungsraumDetail(plrId: string) {
@@ -1382,6 +1410,18 @@ async function geocodeLocal(query: string): Promise<Place | null> {
   return street?.lat ? { lat: street.lat, lon: street.lon, name: q } : null
 }
 
+const straightKm = (
+  a: { lat: number; lon: number },
+  b: { lat: number; lon: number },
+) => 111.32 * Math.hypot(a.lat - b.lat, (a.lon - b.lon) * COS_LAT)
+/**
+ * Door-to-door ÖPNV minutes from straight-line km. Fitted on 72 live BVG journeys
+ * (weekday 08:00, 1–18 km): median error ~0, one in four trips is 6+ min slower.
+ */
+const estimateTransitMinutes = (km: number) => Math.round(14.6 + 2.6 * km)
+/** 75th percentile of (live − estimate) in the same fit */
+const ESTIMATE_MARGIN_MIN = 6
+
 /**
  * Door-to-door public transport time from each candidate PLZ (centroid) to a
  * work place, next weekday morning. Uses the live BVG API; when it is down,
@@ -1401,16 +1441,14 @@ export async function getCommute({ to, plzs, departAt }: CommuteInput) {
     homes.map(async (p) => {
       const from = { lat: p.lat, lon: p.lon, name: `${p.plz} Berlin` }
       const j = live ? await bvgJourney(from, dest, departAt) : null
-      const km =
-        111.32 * Math.hypot(p.lat - dest.lat, (p.lon - dest.lon) * COS_LAT)
+      const km = straightKm(p, dest)
       return {
         plz: p.plz,
         ortsteil: p.ortsteil,
         straightLineKm: round(km, 1),
         ...(j
           ? { ...j, estimated: false }
-          : // ~22 km/h door to door incl. walking and waiting, typical for Berlin ÖPNV
-            { minutes: Math.round(8 + (km / 22) * 60), estimated: true }),
+          : { minutes: estimateTransitMinutes(km), estimated: true }),
       }
     }),
   )
@@ -1422,3 +1460,108 @@ export async function getCommute({ to, plzs, departAt }: CommuteInput) {
     results: results.sort((a, b) => a.minutes - b.minutes),
   }
 }
+
+/**
+ * The Kiez finder: ranks Planungsraeume like `rankPlanungsraum`, then keeps only areas from which
+ * every important place (work, school, …) is within `maxCommuteMin` by ÖPNV. The filter uses the
+ * straight-line estimate for all 500+ areas; the shown results then get a live BVG journey where the
+ * API answers (`estimated: false`), which can come out above the limit (`overLimit`).
+ * If no area fits, returns the areas with the shortest worst commute instead (`relaxed: true`).
+ */
+export async function findKiezMatches(input: {
+  rank: RankPlrInput
+  places: { kind: string; address: string }[]
+  maxCommuteMin: number
+  limit?: number | null
+}) {
+  const [{ weightsUsed, results }, places] = await Promise.all([
+    scorePlanungsraeume(input.rank),
+    Promise.all(
+      input.places.slice(0, 3).map(async (pl) => {
+        const live = await bvgGeocode(pl.address)
+        return {
+          ...pl,
+          live: live != null,
+          at: live ?? (await geocodeLocal(pl.address)),
+        }
+      }),
+    ),
+  ])
+  const found = places.filter((p) => p.at != null)
+  const withCommutes = results.map((r) => {
+    const commutes = found.map((p) => {
+      const km = straightKm(r, p.at!)
+      return {
+        kind: p.kind,
+        to: p.at!.name,
+        minutes: estimateTransitMinutes(km),
+        estimated: true,
+        lines: [] as string[],
+        overLimit: false,
+      }
+    })
+    return {
+      ...r,
+      commutes,
+      worstCommute: Math.max(0, ...commutes.map((c) => c.minutes)),
+    }
+  })
+  const within = withCommutes.filter(
+    (r) => r.worstCommute <= input.maxCommuteMin,
+  )
+  const relaxed = within.length === 0 && withCommutes.length > 0
+  const limit = clampLimit(input.limit, 6)
+  // The estimate is a median, so half of the areas that pass it are really slower.
+  // Prefer areas that pass with the 75th-percentile error (+6 min) for the live check.
+  const safe = within.filter(
+    (r) => r.worstCommute + ESTIMATE_MARGIN_MIN <= input.maxCommuteMin,
+  )
+  const pool = (
+    relaxed
+      ? [...withCommutes].sort((a, b) => a.worstCommute - b.worstCommute)
+      : [...safe, ...within.filter((r) => !safe.includes(r))]
+  ).slice(0, limit * 2)
+
+  // Live journeys only for the pool, and only if the API answered the geocode
+  await Promise.all(
+    pool.flatMap((r) =>
+      r.commutes.map(async (c, i) => {
+        if (!found[i].live) return
+        const j = await bvgJourney(
+          { lat: r.lat, lon: r.lon, name: r.plrName },
+          found[i].at!,
+        )
+        if (!j) return
+        Object.assign(c, {
+          minutes: j.minutes,
+          lines: j.lines,
+          estimated: false,
+          overLimit: j.minutes > input.maxCommuteMin,
+        })
+      }),
+    ),
+  )
+  for (const r of pool)
+    r.worstCommute = Math.max(0, ...r.commutes.map((c) => c.minutes))
+  // Stable sort: areas that really fit first, each group still by score
+  const top = pool
+    .map((r) => ({ r, over: r.commutes.some((c) => c.overLimit) }))
+    .sort((a, b) => Number(a.over) - Number(b.over))
+    .map(({ r }) => r)
+    .slice(0, limit)
+
+  return {
+    weightsUsed,
+    candidates: results.length,
+    withinCommute: within.length,
+    relaxed,
+    places: places.map((p) => ({
+      kind: p.kind,
+      address: p.address,
+      foundAs: p.at?.name ?? null,
+    })),
+    results: top,
+  }
+}
+export type KiezMatches = Awaited<ReturnType<typeof findKiezMatches>>
+export type KiezMatch = KiezMatches["results"][number]

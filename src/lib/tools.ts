@@ -41,7 +41,7 @@ const defs = [
   {
     name: "rank_planungsraeume",
     description:
-      "Rank Berlin Planungsräume (542 official planning areas, finer than a PLZ) for a person's priorities: affordability, schools, safety (crime rate), noise, air, green space, heat, kitas per child, transit (full VBB network), location quality, hobbies (yoga, gym, bouldering) and closeness to the centre. Hard filters: Bezirk, rent, transit distance, distance from Alexanderplatz, outside/inside the Ring, Kita and paediatrician present, matching rental listings. Prefer this over rank_neighbourhoods for 'where should I live' questions.",
+      "Rank Berlin Planungsräume (542 official planning areas, finer than a PLZ) for a person's priorities: affordability, schools, safety (crime rate), noise, air, green space, heat, kitas per child, transit (full VBB network), location quality, hobbies (yoga, gym, bouldering), closeness to the centre, and parks, cafés and playgrounds (OpenStreetMap, per PLZ). Hard filters: Bezirk, rent, transit distance, distance from Alexanderplatz, outside/inside the Ring, Kita and paediatrician present, matching rental listings. Prefer this over rank_neighbourhoods for 'where should I live' questions.",
     parameters: rankPlanungsraumInput,
     run: async (input: z.infer<typeof rankPlanungsraumInput>) => {
       // the model writes up ~5 areas, so don't feed it 10
@@ -51,7 +51,7 @@ const defs = [
         // the map position and photo URL are for the UI, not the model
         results: r.results.map(
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          ({ lat, lon, photoUrl, ...rest }) => rest,
+          ({ lat, lon, photo, ...rest }) => rest,
         ),
       }
     },
@@ -102,7 +102,7 @@ const defs = [
   {
     name: "rank_neighbourhoods",
     description:
-      "Rank Berlin postal codes (PLZ) for a person's priorities: affordability, schools, safety, air, kitas, transit (7 lines only), location quality, nature and cafés/playgrounds (OpenStreetMap). Use this when the person talks in PLZ or wants parks, cafés or playgrounds; otherwise prefer rank_planungsraeume.",
+      "Rank Berlin postal codes (PLZ) for a person's priorities: affordability, schools, safety, air, kitas, transit (7 lines only), location quality, nature and cafés/playgrounds (OpenStreetMap). Use this when the person talks in PLZ or wants the green/water share; otherwise prefer rank_planungsraeume.",
     parameters: rankKiezInput,
     run: rankKiez,
   },

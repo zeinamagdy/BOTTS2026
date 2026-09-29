@@ -2,7 +2,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-/** The orange "Find my Kiez →" pill. Points at /explore until the finder exists. */
+/** The orange "Find my Kiez →" pill: starts the Kiez finder. */
 export function FindKiezButton({
   size = "pill-lg",
   className,
@@ -14,7 +14,7 @@ export function FindKiezButton({
     <Button
       size={size}
       nativeButton={false}
-      render={<Link href="/explore" />}
+      render={<Link href="/find" />}
       className={cn("hover:bg-primary/90", className)}
     >
       Find my Kiez →
