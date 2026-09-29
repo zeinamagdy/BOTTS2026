@@ -16,9 +16,12 @@
   --font-heading: var(--font-rubik);
   --font-inter: var(--font-inter-sans);
   --font-geist: var(--font-geist-sans);
+  --color-brand-50: var(--brand-50);
   --color-brand-100: var(--brand-100);
   --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
   --color-brand-500: var(--brand-500);
+  --color-brand-700: var(--brand-700);
   --color-subtle: var(--subtle);
   --color-faint: var(--faint);
   --color-brand-600: var(--brand-600);
@@ -30,6 +33,9 @@
   --color-info-foreground: var(--info-foreground);
   --color-section: var(--section);
   --color-heading: var(--heading);
+  --color-panel: var(--panel);
+  --color-panel-foreground: var(--panel-foreground);
+  --color-panel-muted: var(--panel-muted);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -94,10 +100,13 @@
   --chart-5: #9a3412;
   --radius: 0.75rem;
   /* Figma brand ramp + semantic helpers */
+  --brand-50: #fff7ed;
   --brand-100: #ffedd5;
   --brand-200: #ffd6a6;
+  --brand-300: #fdba74;
   --brand-500: #f97316;
   --brand-600: #ea580c;
+  --brand-700: #c2410c;
   --brand-950: #431407;
   /* theme/500 and theme/400 greys: form labels and unselected options */
   --subtle: #737373;
@@ -109,6 +118,10 @@
   --info-foreground: #1864ab;
   --section: #ffedd5;
   --heading: #262626;
+  /* Figma's dark decision panel (landlord step 4) */
+  --panel: #262626;
+  --panel-foreground: #faf9f9;
+  --panel-muted: #d4d4d4;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -143,10 +156,13 @@
   --chart-3: #ea580c;
   --chart-4: #1c7ed6;
   --chart-5: #fed7aa;
+  --brand-50: #2a160b;
   --brand-100: #ffedd5;
   --brand-200: #ffd6a6;
+  --brand-300: #7c2d12;
   --brand-500: #f97316;
   --brand-600: #ea580c;
+  --brand-700: #fed7aa;
   --brand-950: #431407;
   --subtle: #a8a29e;
   --faint: #78716c;
@@ -157,6 +173,9 @@
   --info-foreground: #d0ebff;
   --section: #1f0f07;
   --heading: #faf9f9;
+  --panel: #292524;
+  --panel-foreground: #faf9f9;
+  --panel-muted: #a8a29e;
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -165,6 +184,44 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/*
+ * Newer Figma palette (landlord frames 101:699–101:1520): beige page, forest
+ * green headings, sage grey text. Scoped to the landlord flow for now; the dark
+ * values are ours (the frames are light only), a deep green in the same family.
+ */
+.theme-kiez {
+  --background: #f5efe3;
+  --foreground: #1b3a2a;
+  --card: #ffffff;
+  --card-foreground: #1b3a2a;
+  --muted-foreground: #4f5d53;
+  --subtle: #606c62;
+  --faint: #8a948b;
+  --heading: #173f2a;
+  --input: #ddd6c8;
+  --border: #e6dfd1;
+  --chip: #ebe4d6;
+  --panel: #173f2a;
+  --panel-foreground: #f5efe3;
+  --panel-muted: #bfcdc2;
+}
+.dark .theme-kiez {
+  --background: #0e1511;
+  --foreground: #e3eadf;
+  --card: #16211b;
+  --card-foreground: #e3eadf;
+  --muted-foreground: #bfcdc2;
+  --subtle: #93a396;
+  --faint: #6f7d72;
+  --heading: #eef3ea;
+  --input: oklch(1 0 0 / 15%);
+  --border: oklch(1 0 0 / 10%);
+  --chip: #223029;
+  --panel: #1f4a33;
+  --panel-foreground: #f5efe3;
+  --panel-muted: #bfcdc2;
 }
 
 @layer base {

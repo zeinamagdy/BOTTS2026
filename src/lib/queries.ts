@@ -1318,6 +1318,64 @@ export async function checkRentFairness(
   return { error: "Not enough comparable listings", plz, wohnlage }
 }
 
+/**
+ * Landlord flat setup: the typed address matched to the official Wohnlage list,
+ * the median service charge per m² of its PLZ (to split a warm rent into cold rent)
+ * and the cold-rent comparables, so the page can place any rent without a round trip.
+ */
+export async function getLandlordFlatContext(input: {
+  address: string
+  areaM2: number
+}) {
+  const { street, houseNumber, plz: typedPlz } = parseAddress(input.address)
+  const hit = street ? await lookupAddress(street, houseNumber, typedPlz) : null
+  const found =
+    hit?.found === "address"
+      ? "address"
+      : hit?.found === "street"
+        ? "street"
+        : null
+  const fair = found
+    ? await checkRentFairness({
+        street,
+        houseNumber,
+        plz: typedPlz,
+        areaM2: input.areaM2,
+        kaltmiete: input.areaM2 * 10, // only the comparables are used
+      })
+    : null
+  const plz = fair && "plz" in fair ? (fair.plz ?? null) : typedPlz
+  const [profile] =
+    plz != null
+      ? await db
+          .select({ ortsteil: kiezProfiles.ortsteil })
+          .from(kiezProfiles)
+          .where(eq(kiezProfiles.plz, plz))
+      : []
+  const [nk] = await db
+    .select({
+      perM2:
+        sql<number>`percentile_cont(0.5) within group (order by ${rentals.nebenkosten}::real / ${rentals.areaM2})`.mapWith(
+          Number,
+        ),
+    })
+    .from(rentals)
+    .where(plz != null ? eq(rentals.plz, plz) : undefined)
+  return {
+    /** "address": exact match, "street": street only, null: not a Berlin address we know */
+    found,
+    address:
+      hit?.found === "address"
+        ? `${hit.address.strasse} ${hit.address.hnr}`
+        : null,
+    plz,
+    ortsteil: profile?.ortsteil ?? null,
+    wohnlage: fair && "wohnlage" in fair ? (fair.wohnlage ?? null) : null,
+    serviceChargePerM2: round(nk?.perM2 ?? 3.4, 2) ?? 3.4,
+    comparables: fair && "comparables" in fair ? fair.comparables : null,
+  }
+}
+
 // ─── Trends, kitas, schools, crime ───────────────────────────────────────────
 
 export async function getPriceTrend(

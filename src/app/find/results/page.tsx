@@ -15,7 +15,7 @@ import { defaultMapLayers } from "@/lib/map-layers"
 import { getResultsMap } from "@/lib/queries"
 
 export const metadata: Metadata = {
-  title: "Your best-fit Kieze · Kiez Concierge",
+  title: "Your best-fit Kieze · KiezKiss",
 }
 
 const NUMBER_WORDS = ["No", "One", "Two", "Three"]

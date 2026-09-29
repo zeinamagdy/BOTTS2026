@@ -18,7 +18,7 @@ async function api<T>(path: string, params: Record<string, string>) {
   try {
     const res = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { "user-agent": "KiezConcierge/0.1 (hackathon demo)" },
+      headers: { "user-agent": "KiezKiss/0.1 (hackathon demo)" },
       next: { revalidate: 86_400 },
     })
     if (res.status >= 500 || res.status === 429)

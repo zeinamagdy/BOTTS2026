@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Kiez Concierge",
+  title: "KiezKiss",
   description:
     "Find the right Berlin neighbourhood: rents, schools, kitas, safety and transit",
 }

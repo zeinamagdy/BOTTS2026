@@ -45,7 +45,7 @@ export default async function Home() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">
-              Kiez Concierge
+              KiezKiss
             </h1>
             <Badge variant="secondary">MVP</Badge>
           </div>

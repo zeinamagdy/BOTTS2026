@@ -1,4 +1,5 @@
 import Image from "next/image"
+import Link from "next/link"
 import { FindKiezButton } from "@/components/home/find-kiez-button"
 import { TornEdge } from "@/components/home/torn-edge"
 import hero from "../../../public/home/hero.jpg"
@@ -28,7 +29,15 @@ export function Hero() {
           Tell us how your family likes to live, and we will help you discover
           areas outside the Berlin ring that still feel special
         </p>
-        <FindKiezButton />
+        <div className="flex flex-col items-center gap-4">
+          <FindKiezButton />
+          <Link
+            href="/landlord"
+            className="text-base font-medium underline-offset-4 hover:underline"
+          >
+            Letting a flat? Sort your applicants →
+          </Link>
+        </div>
       </div>
       <TornEdge className="text-background absolute inset-x-0 -bottom-px h-auto w-full" />
     </section>
