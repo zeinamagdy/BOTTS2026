@@ -31,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   coldRent,
   DEMO_FLAT,
+  DEMO_SETTINGS,
   DOCUMENTS,
   FALLBACK_SERVICE_CHARGE_M2,
   flatSettingsToParams,
@@ -455,6 +456,24 @@ export function FlatSetup({
     })
   }
 
+  // The demo flat in Baumschulenweg, so the pitch can skip the typing
+  const fillDemo = () => {
+    const d = DEMO_SETTINGS
+    setText("")
+    setNeedText(false)
+    setExtras([])
+    setAddress(d.address)
+    setType(d.type)
+    setAreaText(String(d.areaM2))
+    setRentText(d.warmRent.toLocaleString("en"))
+    setRooms(d.rooms)
+    setDocs(d.docs)
+    setIncomeMultiple(d.incomeMultiple)
+    setWelcome(d.welcome)
+    setNonSmoking(d.nonSmoking)
+    setHighlight(["address", "type", "area", "rent", "rooms", "docs"])
+  }
+
   return (
     <main className="flex flex-1 flex-col">
       <SiteNav tone="page" audience="landlords" />
@@ -471,6 +490,15 @@ export function FlatSetup({
                 What you set here becomes the main factors that applicants are
                 checked against.
               </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={fillDemo}
+                className="text-heading h-auto self-start rounded-full px-5 py-3 text-base font-bold"
+              >
+                <SparklesIcon className="text-brand-500" />
+                Fill in a demo {noun}
+              </Button>
             </div>
             <div className="bg-chip relative aspect-[455/406] overflow-hidden rounded-3xl">
               <Image

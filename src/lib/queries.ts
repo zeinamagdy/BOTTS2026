@@ -772,6 +772,7 @@ async function scorePlanungsraeume(input: RankPlrInput) {
         ortsteil: p.ortsteil,
         bezirk: p.bezirk,
         dominantPlz: p.dominantPlz,
+        distanceFromCenterKm: p.distanceFromCenterKm,
         insideRing: p.insideRing,
         lat: p.lat,
         lon: p.lon,
@@ -1676,6 +1677,34 @@ const estimateTransitMinutes = (km: number) => Math.round(14.6 + 2.6 * km)
 /** 75th percentile of (live − estimate) in the same fit */
 const ESTIMATE_MARGIN_MIN = 6
 
+/** Finder picks are at least this far apart in distance from Alexanderplatz */
+const MIN_CENTER_GAP_KM = 1
+
+/**
+ * Up to `n` areas in order, each in a different PLZ from the others and at least `gapKm` apart
+ * in distance from the center (an unknown PLZ or distance never blocks). `seed` is kept first.
+ */
+function pickSpread<
+  T extends { dominantPlz: number | null; distanceFromCenterKm: number | null },
+>(items: T[], n: number, gapKm: number, seed: T[] = []) {
+  const out = [...seed]
+  for (const r of items) {
+    if (out.length >= n) break
+    if (
+      out.every(
+        (q) =>
+          q !== r &&
+          (q.dominantPlz == null || q.dominantPlz !== r.dominantPlz) &&
+          (q.distanceFromCenterKm == null ||
+            r.distanceFromCenterKm == null ||
+            Math.abs(q.distanceFromCenterKm - r.distanceFromCenterKm) >= gapKm),
+      )
+    )
+      out.push(r)
+  }
+  return out
+}
+
 /** Our own address data first; BVG only for what it can't place (landmarks, POIs). */
 const geocode = async (query: string) =>
   (await geocodeLocal(query)) ?? (await bvgGeocode(query))
@@ -1767,11 +1796,16 @@ export async function findKiezMatches(input: {
   const safe = within.filter(
     (r) => r.worstCommute + ESTIMATE_MARGIN_MIN <= input.maxCommuteMin,
   )
-  const pool = (
-    relaxed
-      ? [...withCommutes].sort((a, b) => a.worstCommute - b.worstCommute)
-      : [...safe, ...within.filter((r) => !safe.includes(r))]
-  ).slice(0, limit * 2)
+  const ordered = relaxed
+    ? [...withCommutes].sort((a, b) => a.worstCommute - b.worstCommute)
+    : [...safe, ...within.filter((r) => !safe.includes(r))]
+  // The best spread-out picks, plus runners-up in other PLZs in case BVG rules some out
+  const pool = pickSpread(
+    ordered,
+    limit * 2,
+    0,
+    pickSpread(ordered, limit, MIN_CENTER_GAP_KM),
+  ).sort((a, b) => ordered.indexOf(a) - ordered.indexOf(b))
 
   // Live journeys refine the estimate for the pool (instant null while BVG is down)
   await Promise.all(
@@ -1794,11 +1828,15 @@ export async function findKiezMatches(input: {
   for (const r of pool)
     r.worstCommute = Math.max(0, ...r.commutes.map((c) => c.minutes))
   // Stable sort: areas that really fit first, each group still by score
-  const top = pool
+  const fitsFirst = pool
     .map((r) => ({ r, over: r.commutes.some((c) => c.overLimit) }))
     .sort((a, b) => Number(a.over) - Number(b.over))
     .map(({ r }) => r)
-    .slice(0, limit)
+  // Every pick in its own PLZ and 1 km apart from the center; only the gap gives way if it must
+  const spread = pickSpread(fitsFirst, limit, MIN_CENTER_GAP_KM)
+  const top = pickSpread(fitsFirst, limit, 0, spread).sort(
+    (a, b) => fitsFirst.indexOf(a) - fitsFirst.indexOf(b),
+  )
 
   return {
     weightsUsed,
