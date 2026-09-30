@@ -14,15 +14,14 @@ export default async function LandlordPage({
   const params = await searchParams
   const settings = flatSettingsFromParams(params)
   // A fresh start shows the demo address, size and rent as placeholders only
-  // and selects no rooms or documents (0 / []); coming back from step 2 keeps
-  // what was entered
+  // and selects no rooms (0), but ticks the usual documents (ID, payslips,
+  // SCHUFA); coming back from step 2 keeps what was entered
   const initial = {
     ...settings,
     address: params.address ? settings.address : "",
     areaM2: params.area ? settings.areaM2 : 0,
     warmRent: params.rent ? settings.warmRent : 0,
     rooms: params.rooms ? settings.rooms : 0,
-    docs: params.docs != null ? settings.docs : [],
   }
   return (
     <FlatSetup

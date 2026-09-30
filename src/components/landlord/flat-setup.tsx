@@ -311,7 +311,7 @@ export function FlatSetup({
   initial,
   context: initialContext,
 }: {
-  /** Empty address, 0 for area, rent or rooms and no docs start as blank fields */
+  /** Empty address, 0 for area, rent or rooms start as blank fields */
   initial: FlatSettings
   context: FlatContext | null
 }) {

@@ -7,7 +7,17 @@ import { toast } from "sonner"
 import { SiteNav } from "@/components/home/site-nav"
 import { Divider, Progress } from "@/components/landlord/parts"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { FieldLabel } from "@/components/finder/finder-shell"
 import { FIELD } from "@/components/finder/form-bits"
 import { householdLabel, type explainShortlist } from "@/lib/applicants"
@@ -139,17 +149,122 @@ function ViewingDay({
   )
 }
 
+/**
+ * "Invite to viewing" for one applicant: a message the landlord can edit, then
+ * a demo send. The message stays in this component; nothing leaves the browser.
+ */
+function InviteDialog({
+  open,
+  onOpenChange,
+  label,
+  street,
+  noun,
+  onSend,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  label: string
+  street: string
+  noun: string
+  onSend: (message: string) => void
+}) {
+  const draft = [
+    "Hello,",
+    "",
+    `Thank you for applying for the ${noun} at ${street}. I would like to invite you to a viewing.`,
+    "",
+    "Please suggest a few times that suit you this week, and bring your ID.",
+    "",
+    "Kind regards",
+  ].join("\n")
+  const [message, setMessage] = useState(draft)
+  const id = `invite-${label.replace(/\W+/g, "-").toLowerCase()}`
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) setMessage(draft)
+        onOpenChange(next)
+      }}
+    >
+      <DialogContent className="theme-kiez bg-card text-foreground gap-6 rounded-3xl p-6 sm:max-w-lg sm:p-8">
+        <DialogHeader className="gap-3">
+          <DialogTitle className="text-heading text-2xl leading-[1.1] font-medium">
+            Invite {label} to a viewing
+          </DialogTitle>
+          <DialogDescription className="text-muted-foreground text-base leading-normal">
+            Write the message they will get. You never see their contact
+            details: KiezKiss relays it.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="flex flex-col gap-6"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (message.trim()) onSend(message.trim())
+          }}
+        >
+          <div className="flex flex-col gap-3">
+            <FieldLabel htmlFor={id}>Your message</FieldLabel>
+            <Textarea
+              id={id}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              maxLength={2000}
+              required
+              className={cn(
+                FIELD,
+                "field-sizing-fixed min-h-[220px] resize-y rounded-2xl leading-normal",
+              )}
+            />
+          </div>
+          <DialogFooter className="mx-0 mb-0 items-center gap-3 rounded-none border-0 bg-transparent p-0 sm:justify-between">
+            <DialogClose
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-brand-950 dark:text-brand-200 h-12 rounded-full px-6 text-base font-bold"
+                />
+              }
+            >
+              Cancel
+            </DialogClose>
+            <Button
+              type="submit"
+              disabled={!message.trim()}
+              className="bg-brand-500 hover:bg-brand-500/90 h-12 rounded-full px-8 text-base font-bold text-white"
+            >
+              <MailIcon aria-hidden className="size-5" />
+              Send invitation
+            </Button>
+          </DialogFooter>
+        </form>
+        <p className="text-subtle -mt-2 text-sm">
+          Demo only: nothing is sent from here.
+        </p>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ApplicantCard({
   card: { applicant: a, reasons, toCheck },
   href,
+  street,
+  noun,
   invited,
   onInvite,
 }: {
   card: Card
   href: string
+  street: string
+  noun: string
   invited: boolean
-  onInvite: () => void
+  onInvite: (message: string) => void
 }) {
+  const [open, setOpen] = useState(false)
   return (
     <article className="flex flex-1 flex-col justify-between gap-10">
       <div className="flex flex-col gap-7">
@@ -186,7 +301,7 @@ function ApplicantCard({
         <div className="flex flex-col gap-4">
           <Button
             type="button"
-            onClick={onInvite}
+            onClick={() => setOpen(true)}
             disabled={invited}
             className={cn(
               "h-[59px] w-full rounded-full px-8 text-lg font-bold",
@@ -203,6 +318,17 @@ function ApplicantCard({
               "Invite to viewing"
             )}
           </Button>
+          <InviteDialog
+            open={open}
+            onOpenChange={setOpen}
+            label={a.name}
+            street={street}
+            noun={noun}
+            onSend={(message) => {
+              setOpen(false)
+              onInvite(message)
+            }}
+          />
           <Button
             variant="ghost"
             nativeButton={false}
@@ -274,12 +400,14 @@ export function Shortlist({
                 <ApplicantCard
                   card={c}
                   href={`/landlord/applications/${c.applicant.id}?${flatSettingsToParams(flat)}`}
+                  street={street}
+                  noun={flat.type === "house" ? "house" : "flat"}
                   invited={invited.includes(c.applicant.id)}
                   onInvite={() => {
                     setInvited((prev) => [...prev, c.applicant.id])
                     toast(`${c.applicant.name} is invited`, {
                       description:
-                        "Demo only: no message is sent. They would pick a viewing slot.",
+                        "Demo only: your message is not sent. They would reply with a time.",
                     })
                   }}
                 />
