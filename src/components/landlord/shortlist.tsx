@@ -171,7 +171,7 @@ export function Shortlist({
         )}
 
         <p className="text-subtle text-sm font-medium">
-          Demo applications with placeholder names, generated for the pitch.
+          Demo applications, generated for the pitch, shown without names.
           Household and employment are explained, never scored.
         </p>
       </div>

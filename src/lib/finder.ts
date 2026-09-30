@@ -16,6 +16,7 @@ import {
   type FinderState,
   type Picks,
   type PriorityKey,
+  typicalRooms,
 } from "@/lib/finder-params"
 import { findKiezMatches, getTypicalRents } from "@/lib/queries"
 
@@ -54,8 +55,7 @@ export async function getFinderResults(s: FinderState) {
     maxCommuteMin: s.commute,
     limit: 3,
   })
-  // A typical flat for the household: 3 rooms with kids, else 2. Context only, not a filter.
-  const rooms = s.kids > 0 || s.expecting ? 3 : 2
+  const rooms = typicalRooms(s)
   const rents = await getTypicalRents(
     matches.results.map((r) => r.plrId),
     rooms,

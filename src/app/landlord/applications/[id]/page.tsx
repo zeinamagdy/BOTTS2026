@@ -50,11 +50,15 @@ export default async function ApplicationPage({
       reasons={reasons}
       toCheck={[...a.issues, ...toCheck]}
       tenure={tenureLabel(a)}
-      note={coverNote(a, {
-        noun,
-        moveIn: DEMO_FLAT.moveIn,
-        docsAsked: flat.docs.length,
-      })}
+      note={
+        a.submitted
+          ? [{ text: a.submitted.coverLetter || "No cover letter." }]
+          : coverNote(a, {
+              noun,
+              moveIn: DEMO_FLAT.moveIn,
+              docsAsked: flat.docs.length,
+            })
+      }
     />
   )
 }

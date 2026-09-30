@@ -17,6 +17,7 @@ import {
 import { db } from "@/db"
 import {
   addresses,
+  applications,
   crimeStats,
   kiezEnrichment,
   kiezPricesMonthly,
@@ -1753,3 +1754,64 @@ export async function findKiezMatches(input: {
 }
 export type KiezMatches = Awaited<ReturnType<typeof findKiezMatches>>
 export type KiezMatch = KiezMatches["results"][number]
+
+// ---------------------------------------------------------------------------
+// Applications (ours: tenants apply through /apply, landlords read them)
+// ---------------------------------------------------------------------------
+
+/** One synthetic listing for the application form, with its Planungsraum name. `null` if unknown */
+export async function getRentalForApplication(rentalId: string) {
+  const [row] = await db
+    .select({
+      id: rentals.id,
+      plrId: rentals.plrId,
+      plrName: planungsraum.plrName,
+      ortsteil: rentals.ortsteil,
+      bezirk: rentals.bezirk,
+      rooms: rentals.rooms,
+      areaM2: rentals.areaM2,
+      floor: rentals.floor,
+      totalFloors: rentals.totalFloors,
+      hasBalcony: rentals.hasBalcony,
+      hasLift: rentals.hasLift,
+      condition: rentals.condition,
+      buildingEra: rentals.buildingEra,
+      kaltmiete: rentals.kaltmiete,
+      warmmiete: rentals.warmmiete,
+    })
+    .from(rentals)
+    .leftJoin(planungsraum, eq(planungsraum.plrId, rentals.plrId))
+    .where(eq(rentals.id, rentalId))
+    .limit(1)
+  return row ?? null
+}
+
+/** A Planungsraum's name, `null` if unknown */
+export async function getPlanungsraumName(plrId: string) {
+  const [row] = await db
+    .select({ plrName: planungsraum.plrName })
+    .from(planungsraum)
+    .where(eq(planungsraum.plrId, plrId))
+    .limit(1)
+  return row?.plrName ?? null
+}
+
+export type NewApplication = typeof applications.$inferInsert
+
+/** Stores a validated application (see `submitApplicationAction`) and returns its id */
+export async function insertApplication(values: NewApplication) {
+  const [row] = await db
+    .insert(applications)
+    .values(values)
+    .returning({ id: applications.id })
+  return row.id
+}
+
+/** Stored applications, newest first (clamped to 200: this is a demo inbox) */
+export async function getApplications(limit = 200) {
+  return db
+    .select()
+    .from(applications)
+    .orderBy(desc(applications.createdAt))
+    .limit(Math.min(Math.max(1, limit), 200))
+}

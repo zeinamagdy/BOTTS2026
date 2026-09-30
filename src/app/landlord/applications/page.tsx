@@ -12,15 +12,15 @@ export default async function ApplicationsPage({
   searchParams,
 }: PageProps<"/landlord/applications">) {
   await connection()
-  const { flat, street, coldRent, inbox, draw } = await loadLandlordInbox(
-    await searchParams,
-  )
+  const { flat, street, coldRent, inbox, submitted, draw } =
+    await loadLandlordInbox(await searchParams)
   return (
     <ApplicationsOverview
       flat={flat}
       street={street}
       coldRent={coldRent}
       inbox={inbox}
+      submitted={submitted}
       draw={draw}
     />
   )

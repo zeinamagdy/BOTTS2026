@@ -1,4 +1,5 @@
 import Image from "next/image"
+import Link from "next/link"
 import { BadgeAlertIcon, SquarePlusIcon } from "lucide-react"
 import { ShowAreaButton } from "@/components/finder/show-area-button"
 import { FactIcons } from "@/components/finder/fact-icons"
@@ -241,12 +242,15 @@ export function MatchCard({
   hobbies,
   wanted,
   maxCommute,
+  flatsHref,
 }: {
   match: KiezMatch
   weights: Record<string, number>
   hobbies: string[]
   wanted: string[]
   maxCommute: number
+  /** Example flats in this area, each with "Apply" */
+  flatsHref: string
 }) {
   const place = clean(m.ortsteil)
   const { benefit, tradeOff } = benefitAndTradeOff(m, weights, hobbies)
@@ -371,6 +375,12 @@ export function MatchCard({
         >
           Explore area
         </ShowAreaButton>
+        <Link
+          href={flatsHref}
+          className="text-brand-600 focus-visible:ring-ring -mt-3 flex w-full items-center justify-center rounded-[12px] px-8 py-3 text-lg font-bold hover:underline focus-visible:ring-2 focus-visible:outline-none"
+        >
+          See flats and apply
+        </Link>
       </div>
     </li>
   )

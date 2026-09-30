@@ -1,4 +1,3 @@
-import firstNames from "../../data/derived/berlin-first-names.json"
 import {
   DEFAULT_INCOME_MULTIPLE,
   DEMO_FLAT,
@@ -18,8 +17,8 @@ import {
  * Only the requirements the landlord set are checked: financial security (any
  * one of four equal routes, see `FinancialRoute`), the chosen documents and the
  * move-in date. Household and employment are shown
- * but never scored. The names are placeholders (see `SURNAMES`) and never
- * feed into anything.
+ * but never scored. Nobody is shown by name: a name (and a surname especially)
+ * hints at origin, so every applicant is a neutral label (`applicantLabel`).
  */
 
 export const EMPLOYMENT = [
@@ -38,7 +37,7 @@ export type HiddenTopic = (typeof HIDDEN_TOPICS)[number]
 
 export type Applicant = {
   id: string
-  /** Placeholder name of the main applicant */
+  /** Neutral label ("Applicant 12", see `applicantLabel`), never a name */
   name: string
   adults: number
   children: number
@@ -73,6 +72,139 @@ export type Applicant = {
   note: { variant: number; hidden: HiddenTopic | null }
   /** Why an application needs a check, shortest first */
   issues: string[]
+  /** Sent through /apply (stored), not a demo applicant */
+  submitted?: {
+    appliedAt: string
+    rentalId: string
+    coverLetter: string
+    /** Uploaded, but the automatic check couldn't read them */
+    unchecked: DocumentKey[]
+  }
+}
+
+/** A stored application (`applications` table), as the landlord flow needs it */
+export type Submission = {
+  id: string
+  createdAt: Date
+  rentalId: string
+  name: string
+  adults: number
+  children: number
+  employment: string
+  income: number | null
+  hasGuarantor: boolean
+  hasDepositInsurance: boolean
+  savings: number
+  moveIn: string
+  documents: Record<
+    string,
+    { status: "verified" | "rejected" | "unchecked"; netIncome?: number | null }
+  >
+  coverLetter: string
+}
+
+/** How the landlord sees every applicant: a number in order of arrival, never a name */
+export const applicantLabel = (n: number) => `Applicant ${n}`
+
+const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Hides the applicant's own name in their letter: the full name first, then each
+ * part, as whole words (umlauts included, any case). It catches the declared
+ * name, not every name or detail a letter might mention.
+ */
+export function hideName(text: string, real: string, replacement = "[name]") {
+  const parts = real
+    .trim()
+    .split(/\s+/)
+    .filter((p) => p.length >= 2)
+  if (!parts.length) return text
+  return [real.trim(), ...parts]
+    .sort((a, b) => b.length - a.length)
+    .reduce(
+      (t, from) =>
+        t.replace(
+          new RegExp(
+            `(?<![\\p{L}\\p{N}])${escapeRe(from)}(?![\\p{L}\\p{N}])`,
+            "giu",
+          ),
+          replacement,
+        ),
+      text,
+    )
+}
+
+/** Stored applications get ids that can't clash with the demo ones (a0, a1, …) */
+export const SUBMISSION_PREFIX = "k-"
+
+/**
+ * A stored application checked against the landlord's current requirements.
+ * A rejected document counts as missing; one the check couldn't read counts as
+ * provided but is listed to check by hand.
+ *
+ * The landlord never sees the real name: like every applicant it is a label
+ * (`number` in order of arrival), and the name is hidden in the letter too.
+ */
+export function applicantFromSubmission(
+  s: Submission,
+  req: Requirements & { moveInDate: string },
+  number: number,
+): Applicant {
+  const name = applicantLabel(number)
+  const status = (k: DocumentKey) => s.documents[k]?.status
+  const docsProvided = DOCUMENTS.map((d) => d.key).filter(
+    (k) => status(k) === "verified" || status(k) === "unchecked",
+  )
+  const unchecked = docsProvided.filter((k) => status(k) === "unchecked")
+  // A payslip shows one earner, so it is only compared for single-adult households
+  const payslipIncome = s.documents.payslips?.netIncome
+  const consistent =
+    s.adults !== 1 ||
+    s.income == null ||
+    payslipIncome == null ||
+    Math.abs(payslipIncome - s.income) <= 100
+  const employment = (EMPLOYMENT as readonly string[]).includes(s.employment)
+    ? (s.employment as Employment)
+    : "Permanent"
+  const facts: ApplicantFacts = {
+    income: s.income,
+    hasGuarantor: s.hasGuarantor,
+    hasDepositInsurance: s.hasDepositInsurance,
+    savings: s.savings,
+    docsProvided,
+    consistent,
+    moveInOk: s.moveIn <= req.moveInDate,
+  }
+  const checked = checkApplicant(facts, req)
+  const issues = [
+    ...checked.issues,
+    ...(unchecked.length
+      ? [`Check by hand: ${unchecked.map((k) => DOC_LABEL[k]).join(", ")}`]
+      : []),
+  ]
+  return {
+    id: `${SUBMISSION_PREFIX}${s.id}`,
+    name,
+    adults: s.adults,
+    children: s.children,
+    employment,
+    ...facts,
+    ...checked,
+    issues,
+    bucket:
+      checked.bucket === "meets" && unchecked.length ? "check" : checked.bucket,
+    taxAssessment: null,
+    contractMonthsLeft: null,
+    receivedAfterH: 0,
+    tenureYears: 0,
+    note: { variant: 0, hidden: null },
+    submitted: {
+      appliedAt: s.createdAt.toISOString(),
+      rentalId: s.rentalId,
+      coverLetter: hideName(s.coverLetter, s.name),
+      unchecked,
+    },
+  }
 }
 
 export type ApplicantInbox = {
@@ -103,121 +235,6 @@ function pick<T>(r: () => number, items: readonly (readonly [T, number])[]) {
 function normal(r: () => number) {
   return Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r())
 }
-
-/**
- * Surnames for the placeholder names. Berlin publishes no open surname data, so
- * these are hand-picked: common German surnames (Lehmann and Schulze are Berlin
- * classics) plus common surnames from the countries most Berliners with a
- * foreign citizenship come from (Turkey, Poland, Syria, Ukraine, Russia,
- * Bulgaria, Vietnam, Italy, Romania, Serbia, Lebanon, Afghanistan, India).
- * Only forms that work for any gender (no Polish -ska, no Russian -ova).
- */
-export const SURNAMES = {
-  german: [
-    "Müller",
-    "Schmidt",
-    "Schneider",
-    "Fischer",
-    "Weber",
-    "Meyer",
-    "Wagner",
-    "Becker",
-    "Schulz",
-    "Hoffmann",
-    "Koch",
-    "Richter",
-    "Klein",
-    "Wolf",
-    "Schröder",
-    "Neumann",
-    "Schwarz",
-    "Braun",
-    "Zimmermann",
-    "Krüger",
-    "Hartmann",
-    "Lange",
-    "Werner",
-    "Krause",
-    "Lehmann",
-    "Schulze",
-    "König",
-    "Walter",
-    "Peters",
-    "Möller",
-    "Jung",
-    "Friedrich",
-    "Vogel",
-    "Keller",
-    "Günther",
-    "Frank",
-    "Berger",
-    "Winkler",
-    "Roth",
-    "Beck",
-    "Lorenz",
-    "Baumann",
-    "Franke",
-    "Albrecht",
-    "Voigt",
-    "Pohl",
-    "Engel",
-    "Kühn",
-    "Horn",
-    "Sommer",
-  ],
-  other: [
-    "Yılmaz",
-    "Kaya",
-    "Demir",
-    "Şahin",
-    "Çelik",
-    "Öztürk",
-    "Arslan",
-    "Doğan",
-    "Nowak",
-    "Kowalczyk",
-    "Wójcik",
-    "Kamiński",
-    "Lewandowski",
-    "Haddad",
-    "Khalil",
-    "Al-Hassan",
-    "Nasser",
-    "Mansour",
-    "Shevchenko",
-    "Kovalenko",
-    "Bondarenko",
-    "Melnyk",
-    "Petrenko",
-    "Popov",
-    "Georgiev",
-    "Nguyen",
-    "Tran",
-    "Pham",
-    "Le",
-    "Rossi",
-    "Russo",
-    "Esposito",
-    "Popescu",
-    "Ionescu",
-    "Petrović",
-    "Jovanović",
-    "Hamdan",
-    "Saleh",
-    "Ahmadi",
-    "Hosseini",
-    "Patel",
-    "Sharma",
-    "García",
-    "Kim",
-    "Chen",
-    "Silva",
-    "Novak",
-    "Horvat",
-  ],
-}
-/** Share of surnames from the second list, near Berlin's ~40% with a migration background */
-const OTHER_SURNAME_SHARE = 0.4
 
 export const DOC_LABEL: Record<DocumentKey, string> = {
   id: "ID",
@@ -298,6 +315,70 @@ const DEPOSIT_INSURANCE_RATE = 0.08
 const NO_SAVINGS_SHARE = 0.55
 const MAX_SAVINGS_MONTHS = 5
 
+/** What the requirement checks read about an applicant: never name, note or household */
+export type ApplicantFacts = Pick<
+  Applicant,
+  | "income"
+  | "hasGuarantor"
+  | "hasDepositInsurance"
+  | "savings"
+  | "docsProvided"
+  | "consistent"
+  | "moveInOk"
+>
+
+export type Requirements = {
+  coldRent: number
+  warmRent: number
+  docs: readonly DocumentKey[]
+  incomeMultiple?: number
+}
+
+/**
+ * The landlord's requirements against one applicant, the same for the demo
+ * inbox and for applications sent through /apply. It takes only
+ * `ApplicantFacts`, so a name, a cover letter or the household can't reach it.
+ */
+export function checkApplicant(f: ApplicantFacts, req: Requirements) {
+  const minIncome =
+    req.coldRent *
+    clampIncomeMultiple(req.incomeMultiple ?? DEFAULT_INCOME_MULTIPLE)
+  const ratio =
+    f.income == null || !req.coldRent ? null : f.income / req.coldRent
+  const docsMissing = req.docs.filter((k) => !f.docsProvided.includes(k))
+  const routes = (
+    [
+      ["income", f.income != null && f.income >= minIncome],
+      ["guarantor", f.hasGuarantor],
+      ["depositInsurance", f.hasDepositInsurance],
+      [
+        "savings",
+        req.warmRent > 0 && f.savings >= SAVINGS_MONTHS * req.warmRent,
+      ],
+    ] as const
+  )
+    .filter(([, ok]) => ok)
+    .map(([route]) => route) as FinancialRoute[]
+
+  const issues = [
+    ...(f.income == null && !routes.length ? ["Income not stated"] : []),
+    ...(docsMissing.length
+      ? [`Missing ${docsMissing.map((k) => DOC_LABEL[k]).join(", ")}`]
+      : []),
+    ...(f.moveInOk ? [] : ["Later move-in"]),
+    ...(f.consistent ? [] : ["Income differs from the payslips"]),
+  ]
+  // Below only when no route is met: a low income with a guarantor, deposit
+  // insurance or enough savings is just as secure
+  const bucket: Applicant["bucket"] =
+    f.income != null && !routes.length
+      ? "below"
+      : issues.length
+        ? "check"
+        : "meets"
+  return { routes, ratio, docsMissing, issues, bucket }
+}
+
 export function buildInbox({
   coldRent,
   warmRent,
@@ -310,29 +391,17 @@ export function buildInbox({
   incomeMultiple?: number
 }): ApplicantInbox {
   const r = rng(2026)
-  const minIncome = coldRent * clampIncomeMultiple(incomeMultiple)
   const { total, duplicates } = inboxSize(warmRent)
   const incomeScale =
     warmRent > 0 ? (warmRent / DEMO_FLAT.warmRent) ** INCOME_SELF_SELECTION : 1
   const unique = total - duplicates
   const all: Applicant[] = []
-  // Own stream, so the names don't shift the other attributes
-  const nr = rng(4711)
   // Attributes added for the shortlist (step 3) draw from a third stream, for the same reason
   const xr = rng(1312)
   // Step 4 (the single application) draws from a fourth stream: 3 draws per applicant
   const dr = rng(1520)
   // The alternative routes to financial security: a fifth stream, 3 draws per applicant
   const fr = rng(2929)
-  const usedNames = new Set<string>()
-  const drawName = () => {
-    for (;;) {
-      const first = nr() < 0.5 ? firstNames.female : firstNames.male
-      const last = nr() < OTHER_SURNAME_SHARE ? SURNAMES.other : SURNAMES.german
-      const name = `${first[Math.floor(nr() * first.length)]} ${last[Math.floor(nr() * last.length)]}`
-      if (!usedNames.has(name)) return (usedNames.add(name), name)
-    }
-  }
 
   for (let i = 0; i < unique; i++) {
     const employment = pick(r, [
@@ -382,9 +451,7 @@ export function buildInbox({
       employment === "Fixed-term" ? 3 + Math.floor(xr() * 22) : null
     const consistent =
       income == null || !docsProvided.includes("payslips") || xr() < 0.95
-    const docsMissing = docs.filter((k) => !docsProvided.includes(k))
     const moveInOk = r() < 0.9
-    const ratio = income == null || !coldRent ? null : income / coldRent
     const tenureYears = 1 + Math.floor(dr() * 14)
     const variant = Math.floor(dr() * 2)
     const hiddenDraw = dr()
@@ -400,37 +467,22 @@ export function buildInbox({
               warmRent) /
               100,
           ) * 100
-    const routes = (
-      [
-        ["income", income != null && income >= minIncome],
-        ["guarantor", hasGuarantor],
-        ["depositInsurance", hasDepositInsurance],
-        ["savings", warmRent > 0 && savings >= SAVINGS_MONTHS * warmRent],
-      ] as const
+    const { routes, ratio, docsMissing, issues, bucket } = checkApplicant(
+      {
+        income,
+        hasGuarantor,
+        hasDepositInsurance,
+        savings,
+        docsProvided,
+        consistent,
+        moveInOk,
+      },
+      { coldRent, warmRent, docs, incomeMultiple },
     )
-      .filter(([, ok]) => ok)
-      .map(([route]) => route)
-
-    const issues = [
-      ...(income == null && !routes.length ? ["Income not stated"] : []),
-      ...(docsMissing.length
-        ? [`Missing ${docsMissing.map((k) => DOC_LABEL[k]).join(", ")}`]
-        : []),
-      ...(moveInOk ? [] : ["Later move-in"]),
-      ...(consistent ? [] : ["Income differs from the payslips"]),
-    ]
-    // Below only when no route is met: a low income with a guarantor, deposit
-    // insurance or enough savings is just as secure
-    const bucket =
-      income != null && !routes.length
-        ? "below"
-        : issues.length
-          ? "check"
-          : "meets"
 
     all.push({
       id: `a${i}`,
-      name: drawName(),
+      name: applicantLabel(i + 1),
       adults,
       children,
       employment,
@@ -475,7 +527,13 @@ export function buildInbox({
     .sort((a, b) => a.issues.length - b.issues.length || byTime(a, b))
   const below = all.filter((a) => a.bucket === "below").sort(byTime)
 
-  return { received: total, duplicatesMerged: duplicates, meets, check, below }
+  return {
+    received: total,
+    duplicatesMerged: duplicates,
+    meets,
+    check,
+    below,
+  }
 }
 
 export function householdLabel(a: Pick<Applicant, "adults" | "children">) {
@@ -578,6 +636,7 @@ const years = (n: number) => `${n} ${n === 1 ? "year" : "years"}`
 
 /** Step 4 "In detail": the one fact about the income source that matters most */
 export function tenureLabel(a: Applicant) {
+  if (a.submitted) return "Not asked in the application"
   switch (a.employment) {
     case "Permanent":
       return `${years(a.tenureYears)} employed`

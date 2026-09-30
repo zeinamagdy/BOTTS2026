@@ -159,6 +159,7 @@ export default async function ResultsPage({
               hobbies={data.understood.hobbies}
               wanted={data.understood.wanted}
               maxCommute={s.commute}
+              flatsHref={`/find/flats?${finderQuery(s, { plr: r.plrId })}`}
             />
           ))}
         </ol>

@@ -1,8 +1,8 @@
 /**
  * Fairness audit of the landlord flow: runs the real `buildInbox` checks and the
  * real Fair Pick draw over the demo inbox, and compares groups the checks never
- * see (a cover note mentioning origin, religion or health; a surname from the
- * non-German list) with everyone else. Two-proportion z-test on who qualifies,
+ * see (a cover note mentioning origin, religion or health) with everyone else.
+ * Names aren't tested: nobody is shown or checked by name. Two-proportion z-test on who qualifies,
  * and the average place in 500 Fair Pick draws.
  *
  * Read it honestly: the demo generator draws these traits independently, so this
@@ -12,7 +12,7 @@
  *   npm run audit:fairness            (demo flat, 3× income)
  *   npm run audit:fairness -- 2.5     (another income multiple)
  */
-import { buildInbox, SURNAMES, type Applicant } from "../src/lib/applicants"
+import { buildInbox, type Applicant } from "../src/lib/applicants"
 import { drawOrder, newSeed } from "../src/lib/fair-pick"
 import {
   coldRent,
@@ -31,13 +31,11 @@ const inbox = buildInbox({
   incomeMultiple: multiple,
 })
 const all = [...inbox.meets, ...inbox.check, ...inbox.below]
-const otherSurnames = new Set(SURNAMES.other)
 
 const groups: [string, (a: Applicant) => boolean][] = [
   ["note mentions origin", (a) => a.note.hidden === "origin"],
   ["note mentions religion", (a) => a.note.hidden === "religion"],
   ["note mentions health", (a) => a.note.hidden === "health"],
-  ["non-German surname", (a) => otherSurnames.has(a.name.split(" ").at(-1)!)],
 ]
 
 function z(k1: number, n1: number, k2: number, n2: number) {

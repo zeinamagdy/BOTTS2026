@@ -67,7 +67,6 @@ export function ApplicationDetail({
   const [invited, setInvited] = useState(false)
   const [saved, setSaved] = useState(false)
   const back = `/landlord/${from}?${flatSettingsToParams(flat)}`
-  const firstName = a.name.split(" ")[0]
 
   const askFor = [
     ...a.docsMissing.map((k) => `the ${DOC_LABEL[k]}`),
@@ -160,10 +159,11 @@ export function ApplicationDetail({
                 In their own words
               </h2>
               <p className="text-muted-foreground">
-                Parts that could reveal protected characteristics are hidden
-                from review.
+                {a.submitted
+                  ? `Their cover letter, sent ${new Date(a.submitted.appliedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} through KiezKiss. Their name is hidden, as for every applicant; you get it when you invite them. The letter is never part of the checks or the draw.`
+                  : "Parts that could reveal protected characteristics are hidden from review."}
               </p>
-              <blockquote className="border-brand-500 text-heading border-l-4 py-1 pl-6 text-lg leading-normal sm:pl-8">
+              <blockquote className="border-brand-500 text-heading border-l-4 py-1 pl-6 text-lg leading-normal whitespace-pre-line sm:pl-8">
                 {note.map((p, i) =>
                   "text" in p ? (
                     <Fragment key={i}>{p.text}</Fragment>
@@ -184,7 +184,7 @@ export function ApplicationDetail({
               type="button"
               variant="outline"
               onClick={() =>
-                toast(`Question sent to ${firstName}`, {
+                toast(`Question sent to ${a.name}`, {
                   description: `Demo only: no message is sent. We’d ask for ${
                     askFor.length
                       ? askFor.join(", ")
@@ -267,7 +267,7 @@ export function ApplicationDetail({
                 onClick={() => {
                   setSaved(!saved)
                   if (!saved)
-                    toast(`${firstName} is saved for later`, {
+                    toast(`${a.name} is saved for later`, {
                       description: "Demo only: kept for this session.",
                     })
                 }}
@@ -286,7 +286,9 @@ export function ApplicationDetail({
         </div>
 
         <p className="text-subtle text-sm font-medium">
-          Demo application with a placeholder name, generated for the pitch.
+          {a.submitted
+            ? "Sent through KiezKiss. Shown without a name, like every applicant."
+            : "Demo application, generated for the pitch. Shown without a name, like every applicant."}{" "}
           Household and employment are shown, never scored.
         </p>
       </div>

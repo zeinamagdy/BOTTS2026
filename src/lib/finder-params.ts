@@ -199,6 +199,10 @@ export type FinderState = {
 }
 export const effectivePicks = (s: FinderState) => s.picks ?? householdPicks(s)
 
+/** A typical flat for the household: 3 rooms with kids, else 2. Context only, not a filter */
+export const typicalRooms = (s: Pick<FinderState, "kids" | "expecting">) =>
+  s.kids > 0 || s.expecting ? 3 : 2
+
 type RawParams = URLSearchParams | Record<string, string | string[] | undefined>
 
 const text = (max: number) => z.string().trim().max(max).catch("")

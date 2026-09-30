@@ -87,7 +87,7 @@ function Stat({
 
 // Figma has 7 equal columns with Status spanning 2; weighted ones keep "2 adults, 1 child" on one line
 const COLS =
-  "sm:grid sm:grid-cols-[1fr_1.4fr_1fr_1.2fr_0.9fr_2fr] sm:gap-x-4 lg:gap-x-6"
+  "sm:grid sm:grid-cols-[1.2fr_1.4fr_1fr_1.2fr_0.9fr_2fr] sm:gap-x-4 lg:gap-x-6"
 
 function ApplicantRow({
   a,
@@ -130,13 +130,20 @@ function ApplicantRow({
         COLS,
       )}
     >
-      <p className="text-muted-foreground flex items-baseline justify-between gap-4 sm:block">
-        <Link
-          href={href}
-          className="hover:text-heading shrink-0 underline-offset-4 hover:underline"
-        >
-          {a.name}
-        </Link>
+      <p className="text-muted-foreground flex min-w-0 items-baseline justify-between gap-4 sm:block">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <Link
+            href={href}
+            className="hover:text-heading underline-offset-4 hover:underline"
+          >
+            {a.name}
+          </Link>
+          {a.submitted && (
+            <span className="bg-brand-500 rounded-full px-2 py-0.5 text-xs font-bold text-white">
+              New
+            </span>
+          )}
+        </span>
         <span className="text-brand-700 text-right text-base sm:hidden">
           {applicantStatus(a, rank)}
         </span>
@@ -287,12 +294,15 @@ export function ApplicationsOverview({
   street,
   coldRent,
   inbox,
+  submitted,
   draw,
 }: {
   flat: FlatSettings
   street: string
   coldRent: number
   inbox: ApplicantInbox
+  /** Sent through /apply; also inside `inbox` */
+  submitted: Applicant[]
   draw: { seed: string; seedHash: string; pool: string } | null
 }) {
   const [filter, setFilter] = useState<FilterKey>("recommended")
@@ -386,8 +396,9 @@ export function ApplicationsOverview({
                 {inbox.below.length.toLocaleString("en")} meet none of the
                 financial routes. Dearer listings draw fewer applicants.{" "}
                 <span className="text-faint">
-                  Demo applications, generated for the pitch. Placeholder names
-                  from Berlin’s open list of common first names.
+                  Demo applications, generated for the pitch. Nobody is shown by
+                  name, including those sent through KiezKiss: a name can hint
+                  at origin, so it can’t sway the review.
                 </span>
               </p>
               {flat.welcome.length > 0 && (
@@ -402,6 +413,47 @@ export function ApplicationsOverview({
                 </p>
               )}
             </div>
+
+            {submitted.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <p className="text-heading font-bold">
+                  {submitted.length === 1
+                    ? "1 application"
+                    : `${submitted.length} applications`}{" "}
+                  sent through KiezKiss, checked like all the others
+                </p>
+                <ul className="flex flex-col gap-2">
+                  {submitted.slice(0, 5).map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex flex-wrap items-baseline gap-x-3 gap-y-1"
+                    >
+                      <Link
+                        href={`/landlord/applications/${a.id}?${flatSettingsToParams(flat)}&from=applications`}
+                        className="text-heading font-medium underline-offset-4 hover:underline"
+                      >
+                        {a.name}
+                      </Link>
+                      <span className="text-muted-foreground text-sm">
+                        {householdLabel(a)} ·{" "}
+                        {a.bucket === "meets"
+                          ? draw
+                            ? (() => {
+                                const place = inbox.meets.findIndex(
+                                  (x) => x.id === a.id,
+                                )
+                                return place < SHORTLIST
+                                  ? `drawn #${place + 1}, on the shortlist`
+                                  : `in the draw, #${place + 1} of ${inbox.meets.length}`
+                              })()
+                            : "meets every requirement, in the Fair Pick pool"
+                          : applicantStatus(a, -1)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <FairPick flat={flat} qualified={inbox.meets.length} draw={draw} />
 

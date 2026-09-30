@@ -21,7 +21,9 @@ import {
   real,
   serial,
   text,
+  timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core"
 
 /** One row per Berlin postal code (193). The main unit for filtering and ranking neighbourhoods. */
@@ -511,6 +513,53 @@ export const kiezEnrichment = pgTable("kiez_enrichment", {
   photoPage: text("photo_page"),
 })
 
+/**
+ * OURS, not from the data repo: rental applications sent through /apply. They
+ * appear in the landlord inbox next to the demo applicants. No uploaded file is
+ * stored, only what the document check read from it (`documents`). No foreign
+ * key to `rentals`, so `db:seed` can truncate the listings. Never seeded.
+ */
+export const applications = pgTable(
+  "applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /** The synthetic listing the tenant applied from */
+    rentalId: text("rental_id").notNull(),
+    plrId: text("plr_id"),
+    name: text("name").notNull(),
+    adults: integer("adults").notNull(),
+    children: integer("children").notNull(),
+    /** One of `EMPLOYMENT` in applicants.ts */
+    employment: text("employment").notNull(),
+    /** Net household income per month in € */
+    income: integer("income"),
+    hasGuarantor: boolean("has_guarantor").notNull(),
+    hasDepositInsurance: boolean("has_deposit_insurance").notNull(),
+    savings: integer("savings").notNull(),
+    moveIn: date("move_in").notNull(),
+    /** Document key → what the document check found (see `DocumentCheck` in documents.ts) */
+    documents: jsonb("documents")
+      .$type<
+        Record<
+          string,
+          {
+            status: "verified" | "rejected" | "unchecked"
+            demo: boolean
+            netIncome?: number | null
+          }
+        >
+      >()
+      .notNull(),
+    coverLetter: text("cover_letter").notNull(),
+    /** When the tenant agreed to storage for this letting (deleted 30 days after it is let) */
+    consentAt: timestamp("consent_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("applications_created_idx").on(t.createdAt)],
+)
+
 export type KiezProfile = typeof kiezProfiles.$inferSelect
 export type Planungsraum = typeof planungsraum.$inferSelect
 export type PoiLocation = typeof poiLocations.$inferSelect
@@ -521,3 +570,4 @@ export type Rental = typeof rentals.$inferSelect
 export type Sale = typeof sales.$inferSelect
 export type NewConstructionUnit = typeof newConstruction.$inferSelect
 export type Kita = typeof kitas.$inferSelect
+export type Application = typeof applications.$inferSelect

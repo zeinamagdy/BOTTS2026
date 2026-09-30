@@ -8,6 +8,7 @@ export const DEMO_FLAT = {
   warmRent: 1480,
   rooms: 3,
   moveIn: "1 Dec 2026",
+  moveInDate: "2026-12-01",
   /** Demo inbox size at this rent, the anchor of `inboxSize` (not real applications) */
   applications: 527,
 } as const
