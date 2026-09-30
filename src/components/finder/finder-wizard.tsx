@@ -5,6 +5,7 @@ import { useId, useState, type ComponentProps } from "react"
 import { HouseIcon, PlusIcon, XIcon } from "lucide-react"
 import { ChoiceGroup } from "@/components/finder/choice-group"
 import { FIELD, StepButtons } from "@/components/finder/form-bits"
+import { PlaceHint } from "@/components/finder/place-hint"
 import { PrioritiesStep } from "@/components/finder/priorities-step"
 import {
   AsideText,
@@ -84,6 +85,7 @@ function StepOne({
             placeholder="Friedrichstraße 68, 10117 Berlin"
             autoComplete="street-address"
           />
+          <PlaceHint query={state.home} onPick={(home) => set({ home })} />
         </div>
         <div className="flex flex-wrap gap-x-[23px] gap-y-6">
           <div className="flex w-[266px] flex-col gap-3">
@@ -100,21 +102,6 @@ function StepOne({
               onChange={(kids) => set({ kids })}
             />
           </div>
-          <div className="flex w-[267px] flex-col gap-3">
-            <FieldLabel id={`${id}-baby`}>
-              Are you expecting a new baby?
-            </FieldLabel>
-            <ChoiceGroup
-              labelledBy={`${id}-baby`}
-              size="lg"
-              options={[
-                { value: "yes", label: "Yes" },
-                { value: "no", label: "No" },
-              ]}
-              value={state.expecting ? "yes" : "no"}
-              onChange={(v) => set({ expecting: v === "yes" })}
-            />
-          </div>
         </div>
       </section>
 
@@ -125,54 +112,60 @@ function StepOne({
             <FieldLabel>Where do you go regularly?</FieldLabel>
             <ul className="flex flex-col gap-[18px]">
               {places.map((p, i) => (
-                <li key={i} className="flex items-center gap-3 sm:gap-[18px]">
-                  <Select
-                    value={p.kind}
-                    onValueChange={(v) =>
-                      v && setPlace(i, { kind: v as PlaceKind })
-                    }
-                  >
-                    <SelectTrigger
-                      aria-label={`Kind of place ${i + 1}`}
-                      className={cn(
-                        FIELD,
-                        "[&>svg]:text-heading! w-[120px] shrink-0 justify-between data-[size=default]:h-auto sm:w-[169px] [&>svg]:size-6!",
-                      )}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PLACE_KINDS.map((k) => (
-                        <SelectItem key={k} value={k} className="text-base">
-                          {k}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <AddressInput
-                    aria-label={`${p.kind} address`}
-                    value={p.address}
-                    onChange={(e) => setPlace(i, { address: e.target.value })}
-                    placeholder={
-                      p.kind === "Work"
-                        ? "Alexanderplatz 1"
-                        : "Address or place"
-                    }
-                  />
-                  {places.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Remove ${p.kind}`}
-                      onClick={() =>
-                        set({ places: places.filter((_, j) => j !== i) })
+                <li key={i} className="flex flex-col gap-2">
+                  <div className="flex items-center gap-3 sm:gap-[18px]">
+                    <Select
+                      value={p.kind}
+                      onValueChange={(v) =>
+                        v && setPlace(i, { kind: v as PlaceKind })
                       }
-                      className="text-subtle -ml-1 shrink-0"
                     >
-                      <XIcon />
-                    </Button>
-                  )}
+                      <SelectTrigger
+                        aria-label={`Kind of place ${i + 1}`}
+                        className={cn(
+                          FIELD,
+                          "[&>svg]:text-heading! w-[120px] shrink-0 justify-between data-[size=default]:h-auto sm:w-[169px] [&>svg]:size-6!",
+                        )}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PLACE_KINDS.map((k) => (
+                          <SelectItem key={k} value={k} className="text-base">
+                            {k}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <AddressInput
+                      aria-label={`${p.kind} address`}
+                      value={p.address}
+                      onChange={(e) => setPlace(i, { address: e.target.value })}
+                      placeholder={
+                        p.kind === "Work"
+                          ? "Alexanderplatz 1"
+                          : "Address or place"
+                      }
+                    />
+                    {places.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${p.kind}`}
+                        onClick={() =>
+                          set({ places: places.filter((_, j) => j !== i) })
+                        }
+                        className="text-subtle -ml-1 shrink-0"
+                      >
+                        <XIcon />
+                      </Button>
+                    )}
+                  </div>
+                  <PlaceHint
+                    query={p.address}
+                    onPick={(address) => setPlace(i, { address })}
+                  />
                 </li>
               ))}
             </ul>

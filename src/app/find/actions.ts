@@ -8,6 +8,7 @@ import {
   suggestInput,
   suggestPicks,
 } from "@/lib/finder"
+import { locatePlace, type PlaceMatch } from "@/lib/queries"
 
 export type SuggestResult =
   { ok: true; picks: Picks; extras: string[] } | { ok: false; error: string }
@@ -50,5 +51,26 @@ export async function refineAction(input: unknown): Promise<RefineResult> {
       ok: false,
       error: "Couldn't read that right now. Edit your answers instead.",
     }
+  }
+}
+
+const placeQuery = z.string().trim().min(3).max(200)
+
+/** Under each address field in step 1: what the text resolves to for the commute check. */
+export async function locatePlaceAction(raw: unknown): Promise<PlaceMatch> {
+  const none = {
+    found: null,
+    name: null,
+    plz: null,
+    ortsteil: null,
+    suggestions: [],
+  }
+  const parsed = placeQuery.safeParse(raw)
+  if (!parsed.success) return none
+  try {
+    return await locatePlace(parsed.data)
+  } catch (err) {
+    console.error("locatePlace failed:", (err as Error).message)
+    return none
   }
 }

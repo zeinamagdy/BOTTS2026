@@ -1565,14 +1565,26 @@ function parseAddress(query: string) {
   }
 }
 
+type LocalPlace = Place & {
+  /** What the text matched: an exact address, a station, a street (its middle) or a PLZ */
+  found: "address" | "station" | "street" | "plz"
+  plz?: number
+}
+
 /** Offline geocoder for when the BVG API is down: our 400k addresses, then stations, streets, PLZ. */
-async function geocodeLocal(query: string): Promise<Place | null> {
+async function geocodeLocal(query: string): Promise<LocalPlace | null> {
   const q = query.trim()
   const { street, houseNumber, plz } = parseAddress(q)
   if (street && houseNumber) {
     const r = await lookupAddress(street, houseNumber, plz)
     if (r.found === "address")
-      return { lat: r.address.lat, lon: r.address.lon, name: q }
+      return {
+        lat: r.address.lat,
+        lon: r.address.lon,
+        name: `${r.address.strasse} ${r.address.hnr}`,
+        found: "address",
+        plz: r.address.plz,
+      }
   }
   if (street) {
     const [station] = await db
@@ -1581,9 +1593,19 @@ async function geocodeLocal(query: string): Promise<Place | null> {
       .where(sql`${transitStations.stationName} ilike ${`%${street}%`}`)
       .limit(1)
     if (station)
-      return { lat: station.lat, lon: station.lon, name: station.stationName }
+      return {
+        lat: station.lat,
+        lon: station.lon,
+        name: station.stationName,
+        found: "station",
+      }
     const [onStreet] = await db
-      .select({ lat: avgOf(addresses.lat), lon: avgOf(addresses.lon) })
+      .select({
+        lat: avgOf(addresses.lat),
+        lon: avgOf(addresses.lon),
+        strasse: sql<string>`min(${addresses.strasse})`,
+        plz: sql<number>`mode() within group (order by ${addresses.plz})`,
+      })
       .from(addresses)
       .where(
         and(
@@ -1594,14 +1616,53 @@ async function geocodeLocal(query: string): Promise<Place | null> {
           plz ? eq(addresses.plz, plz) : undefined,
         ),
       )
-    if (onStreet?.lat) return { lat: onStreet.lat, lon: onStreet.lon, name: q }
+    if (onStreet?.lat)
+      return {
+        lat: onStreet.lat,
+        lon: onStreet.lon,
+        name: onStreet.strasse,
+        found: "street",
+        plz: onStreet.plz,
+      }
   }
   if (plz) {
     const p = await getKiezFull(plz)
-    if (p) return { lat: p.lat, lon: p.lon, name: `PLZ ${plz}` }
+    if (p)
+      return { lat: p.lat, lon: p.lon, name: `PLZ ${plz}`, found: "plz", plz }
   }
   return null
 }
+
+/**
+ * Finder "important places": what a typed place resolves to, with the same
+ * geocoder the commute check uses (our data first, then BVG for landmarks).
+ * `found: null` comes with close street spellings when there are any.
+ */
+export async function locatePlace(query: string) {
+  const local = await geocodeLocal(query)
+  const hit = local ?? (await bvgGeocode(query))
+  if (hit) {
+    const plz = local?.plz ?? null
+    const profile = plz != null ? await getKiezFull(plz) : null
+    return {
+      found: local?.found ?? ("place" as const),
+      name: hit.name,
+      plz,
+      ortsteil: profile?.ortsteil ?? null,
+      suggestions: [] as string[],
+    }
+  }
+  const { street } = parseAddress(query)
+  const r = street ? await lookupAddress(street) : null
+  return {
+    found: null,
+    name: null,
+    plz: null,
+    ortsteil: null,
+    suggestions: r?.found === "none" ? r.suggestions.slice(0, 3) : [],
+  }
+}
+export type PlaceMatch = Awaited<ReturnType<typeof locatePlace>>
 
 const straightKm = (
   a: { lat: number; lon: number },
