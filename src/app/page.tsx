@@ -1,33 +1,25 @@
-import { connection } from "next/server"
+import { About, SiteFooter } from "@/components/home/about"
+import { AudienceSplit } from "@/components/home/audience-split"
+import { FairByDesign } from "@/components/home/fair-by-design"
 import { Hero } from "@/components/home/hero"
-import { HiddenGems } from "@/components/home/hidden-gems"
 import { HowItWorks } from "@/components/home/how-it-works"
 import { SiteNav } from "@/components/home/site-nav"
-import { getHomeHighlights, type HomeHighlights } from "@/lib/queries"
+import { Spotlight } from "@/components/home/spotlight"
 
-async function loadHighlights(): Promise<HomeHighlights | null> {
-  try {
-    return await getHomeHighlights()
-  } catch (err) {
-    // The landing page still renders (static copy) when the DB is down
-    console.error("getHomeHighlights failed:", (err as Error).message)
-    return null
-  }
-}
-
-export default async function Home() {
-  await connection() // render per request (reads live DB data)
-  const data = await loadHighlights()
-
+/** Landing page from Figma (node 117:210), in the beige + green palette */
+export default function Home() {
   return (
-    <main className="relative flex flex-1 flex-col">
+    <main className="theme-kiez bg-background text-foreground relative flex flex-1 flex-col">
       <SiteNav />
       <Hero />
-      <HowItWorks spotlight={data?.gems[0] ?? null} />
-      <HiddenGems
-        gems={data?.gems ?? []}
-        outsideRing={data?.outsideRing ?? null}
-      />
+      <div className="mx-auto flex w-full max-w-[1328px] flex-col gap-24 px-4 pt-16 sm:gap-36 sm:pt-36">
+        <AudienceSplit />
+        <Spotlight />
+        <HowItWorks />
+        <FairByDesign />
+        <About />
+        <SiteFooter />
+      </div>
     </main>
   )
 }

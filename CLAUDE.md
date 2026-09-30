@@ -41,7 +41,7 @@ Env lives in `.env.local` (git-ignored; `.env.example` is committed): `DATABASE_
 ## Layout
 
 ```
-src/app/page.tsx                  landing page from Figma (node 19:270): nav, hero, How it works, Hidden Gems
+src/app/page.tsx                  landing page from Figma (node 117:210), static (no DB), in `.theme-kiez`: hero (Find my Kiez / I'm a landlord), renter + landlord split card, Baumschulenweg spotlight (static copy, checked against the data: 27 min BVG to Alexanderplatz, 16 Kitas), How it works (renter + landlord tracks), Fair by design, About, footer. `getHomeHighlights` (the old Hidden Gems) is unused now
 src/app/explore/page.tsx          old placeholder dashboard (Overview / Kiez map / AI Assistant)
 src/app/find/page.tsx             Kiez finder wizard from Figma (Step 01 = node 41:3826, Step 2 = node 57:5068), `?step=2`; all "Find my Kiez →" CTAs point here
 src/app/find/results/page.tsx     finder results from Figma (node 69:250): headline, answer tags + "Edit tags", 3 cards (photo, commute bar, budget, main benefit/trade-off from the weighted factors, "Explore area" scrolls to the map and selects that area) + a priorities map + loading.tsx
@@ -55,8 +55,8 @@ src/components/finder/            finder-shell (nav + card + grey aside), choice
 src/lib/finder-params.ts          client-safe: the priority keys (`PRIORITY_META`, typed against the `rankPlanungsraumInput` weights, so a new factor fails the build until it has a label), Must have/Flexible/Don't need levels (internal values protect/ok/letgo, weights 5/2/0), the `INTERESTS` (yoga, gym, bouldering + cafés/playgrounds/parks, which raise the same-named factor to Must have) and must-haves, the rent caps, household defaults, and answers <-> URL (home, kids, baby, place=Kind:address ≤3, commute, w=key:weight,…, hobby, must, rent, q)
 src/components/finder/results-map.tsx   results map (client, lazy via results-map-lazy): one area at a time (outline + number tabs), highlight layers from `src/lib/map-layers.ts`; the person's protected priorities start switched on. Parks/green and school grounds recolour the basemap's own layers; schools, playgrounds, cafés and stations are circles on the basemap's `poi` source layer (OpenMapTiles classes, counted inside the outline only at zoom ≥14, where the tiles are complete); Kitas, Kinderarzt and hobbies are our `poi_locations` via `getResultsMap(plrIds)`. Cards talk to it through the `kiez:show-area` window event (`show-area-button.tsx`)
 src/lib/finder.ts                 server: picks → rankPlanungsraum input (deterministic, no model) → findKiezMatches; `suggestPicks` (OpenAI `responses.parse`, FAST_MODEL, gets the current picks and changes only what the text mentions, cached in memory)
-src/components/home/              landing sections (site-nav, hero, torn-edge, how-it-works, hidden-gems, find-kiez-button)
-public/home/                      Figma image exports (hero.jpg is only 1024 px wide, ask the designer for full res)
+src/components/home/              landing sections (site-nav with the Figma logo mark, hero, audience-split, spotlight, how-it-works, fair-by-design, about + SiteFooter) and `CtaLink` (the orange / cream Figma pill; `FindKiezButton` wraps it)
+public/home/                      Figma image exports (hero-park.jpg is only 731 px wide and shown full-bleed, ask the designer for full res; house.jpg is the match-card fallback)
 src/lib/area-photos.ts            hand-picked photo per PLZ (`AREA_PHOTOS`, files in `public/areas/`); wins over the Wikimedia photo in the gems and result cards, no DB change
 src/lib/bvg.ts                    BVG HAFAS REST client (v6.bvg.transport.rest, no key), null on failure
 data/derived/                     OUR derived JSON (OSM, Wikimedia), committed; `.cache/` inside is ignored
@@ -87,7 +87,7 @@ data/tech-battle/                 cloned data repo (git-ignored, never commit it
 - Validate request bodies with Zod `safeParse`, and return 400 with `z.treeifyError(...)` on failure.
 - Code style: no semicolons, double quotes, Prettier with the tailwind plugin. Imports use the `@/` alias. Run `npx prettier --write` on the files you touch.
 - shadcn: add components with `npx shadcn@latest add <name>`. Base UI uses the **`render` prop, not `asChild`**. Tabs, Select and similar components follow Base UI APIs, not Radix.
-- **Two palettes:** the root theme is the older neutral grey + orange; the landlord flow (`src/app/landlord/layout.tsx`) wraps its pages in `.theme-kiez` (globals.css), the newer Figma palette: beige `#f5efe3` page, forest green `#173f2a` headings and decision panel, sage `#4f5d53` text (dark values are ours). Tokens are overridden, so components keep using `text-heading`, `bg-background`, `bg-panel` etc. Move it to `:root` once the other screens get the new design.
+- **Two palettes:** the root theme is the older neutral grey + orange; the landing page and the landlord flow (`src/app/landlord/layout.tsx`) wrap their pages in `.theme-kiez` (globals.css), the newer Figma palette: beige `#f5efe3` page, forest green `#173f2a` headings and decision panel, sage `#4f5d53` text (dark values are ours). Tokens are overridden, so components keep using `text-heading`, `bg-background`, `bg-panel` etc. Move it to `:root` once the other screens get the new design.
 - Every page must work in both light and dark mode. Use theme tokens (`bg-muted`, `text-muted-foreground`, `var(--chart-N)`), not hard-coded colors. The current theme is neutral grey, so `--chart-1..5` are grey shades until the Figma palette is mapped.
 - Label synthetic numbers as "synthetic" in the UI (see "Data").
 

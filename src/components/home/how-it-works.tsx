@@ -1,237 +1,71 @@
-import Image from "next/image"
-import type { ReactNode } from "react"
-import { kiezName } from "@/components/home/kiez-name"
-import type { HomeGem } from "@/lib/queries"
-import { cn } from "@/lib/utils"
-import house from "../../../public/home/house.jpg"
-import map from "../../../public/home/map.png"
+const TRACKS = [
+  {
+    label: "For renters",
+    steps: [
+      {
+        title: "Tell us about your life",
+        text: "Household, commutes, budget and why you are moving.",
+      },
+      {
+        title: "We understand what matters",
+        text: "Write freely. We turn it into must-haves and flexible wishes.",
+      },
+      {
+        title: "Discover relevant Kieze",
+        text: "Three areas, including hidden gems you may not know.",
+      },
+      {
+        title: "Understand the trade-offs",
+        text: "Honest gains and trade-offs against where you live now.",
+      },
+    ],
+  },
+  {
+    label: "For landlords",
+    steps: [
+      {
+        title: "Define the flat",
+        text: "Address, rent, rooms and the documents you need.",
+      },
+      {
+        title: "Receive applications",
+        text: "Duplicates merged, each one checked against your requirements.",
+      },
+      {
+        title: "Permitted information only",
+        text: "Income, employment, household and documents. Nothing else counts.",
+      },
+      {
+        title: "Review and decide",
+        text: "A shortlist with reasons and open points. You make the call.",
+      },
+    ],
+  },
+]
 
-function UserBubble({
-  children,
-  className,
-}: {
-  children: ReactNode
-  className?: string
-}) {
+export function HowItWorks() {
   return (
-    <p
-      className={cn(
-        "bg-bubble text-bubble-foreground ml-auto max-w-[314px] rounded-[18px] rounded-br-none p-3",
-        className,
-      )}
-    >
-      {children}
-    </p>
-  )
-}
-
-function BotBubble({ children }: { children: ReactNode }) {
-  return (
-    <p className="bg-card mr-auto max-w-[300px] rounded-[18px] rounded-bl-none border p-3">
-      {children}
-    </p>
-  )
-}
-
-function Chip({ children, active }: { children: ReactNode; active?: boolean }) {
-  return (
-    <span
-      className={cn(
-        "rounded-full px-3 py-2 text-base",
-        active ? "bg-info text-info-foreground" : "bg-chip text-foreground",
-      )}
-    >
-      {children}
-    </span>
-  )
-}
-
-/** Illustration card: fixed height on desktop, like the Figma frames. */
-function Panel({
-  children,
-  className,
-}: {
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <div
-      className={cn(
-        "bg-card relative min-h-[380px] overflow-hidden rounded-xl sm:h-[468px]",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  )
-}
-
-function Step({
-  title,
-  text,
-  children,
-}: {
-  title: string
-  text: string
-  children: ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-6">
-      {children}
-      <div className="flex flex-col gap-3 sm:flex-row sm:gap-[81px]">
-        <h3 className="text-heading w-[185px] shrink-0 text-[28px] leading-[1.1] font-medium">
-          {title}
-        </h3>
-        <p className="text-muted-foreground max-w-[290px] text-lg">{text}</p>
-      </div>
-    </div>
-  )
-}
-
-function badgesFor(gem: HomeGem) {
-  const f = gem.facts
-  const out: string[] = []
-  if ((gem.factorScores.kitas ?? 0) >= 60) out.push("Family-friendly")
-  if (f.nKitas) out.push(`${f.nKitas} Kitas`)
-  if (f.greenPct1km != null && f.greenPct1km >= 20)
-    out.push(`${f.greenPct1km}% green`)
-  else if (f.parks1km) out.push(`${f.parks1km} parks`)
-  return out.slice(0, 3)
-}
-
-/** Positions from the 556×468 Figma frame, as percentages so the map scales. */
-const pct = (x: number, y: number, w: number, h: number) => ({
-  left: `${(x / 556) * 100}%`,
-  top: `${(y / 468) * 100}%`,
-  width: `${(w / 556) * 100}%`,
-  height: `${(h / 468) * 100}%`,
-})
-
-export function HowItWorks({ spotlight }: { spotlight: HomeGem | null }) {
-  const badges = spotlight ? badgesFor(spotlight) : ["Family-friendly", "Kita"]
-  return (
-    <section
-      id="how-it-works"
-      className="mx-auto w-full max-w-[1136px] scroll-mt-8 px-4 py-16 sm:py-24"
-    >
-      <h2 className="text-heading mb-10 text-4xl font-medium sm:mb-16 sm:text-[52px]">
+    <section id="how-it-works" className="flex scroll-mt-8 flex-col gap-16">
+      <h2 className="text-heading text-4xl leading-[1.1] sm:text-[52px]">
         How it works
       </h2>
-      <div className="grid gap-x-6 gap-y-16 md:grid-cols-2">
-        <Step
-          title="Tell us about your family"
-          text="Kids, work, commute: a few answers are enough."
-        >
-          <Panel className="font-inter flex flex-col justify-center gap-6 px-6 text-lg sm:px-10 sm:text-xl">
-            <UserBubble>
-              We are two parents with a 3-year-old. I commute to Mitte.
-            </UserBubble>
-            <BotBubble>
-              Got it. I will look for areas with a Kita nearby and a short
-              commute.
-            </BotBubble>
-            <UserBubble>Ideally somewhere green.</UserBubble>
-          </Panel>
-        </Step>
-
-        <Step
-          title="Pick what matters"
-          text="Mark what is a must have and what is flexible: nature, Kitas, budget and more."
-        >
-          <Panel className="font-inter flex flex-col justify-center gap-5 px-6 text-lg sm:px-12 sm:text-xl">
-            <UserBubble>We want green space and a Kita close by.</UserBubble>
-            <BotBubble>Noted. What else is a must have?</BotBubble>
-            <p className="max-w-[306px]">
-              What would be important to have nearby?
-            </p>
-            <div className="flex flex-wrap gap-3 font-sans">
-              <Chip>Kita</Chip>
-              <Chip active>Nature</Chip>
-              <Chip>Cafés</Chip>
-            </div>
-            <UserBubble className="w-fit">Nature</UserBubble>
-          </Panel>
-        </Step>
-
-        <Step
-          title="Discover your Kieze"
-          text="Get the best-fit Kieze, ranked for your family."
-        >
-          <Panel className="flex items-center justify-center p-6">
-            <div className="bg-card flex w-[283px] flex-col gap-2 rounded-[14px] p-3 shadow-lg ring-1 ring-black/5">
-              <p className="font-inter truncate text-xl font-medium">
-                {spotlight
-                  ? `${kiezName(spotlight)}, ${spotlight.plz}`
-                  : "Name of house"}
-              </p>
-              <div className="relative h-[240px] overflow-hidden rounded sm:h-[300px]">
-                <Image
-                  src={spotlight?.photo?.url ?? house}
-                  alt={spotlight?.photo?.title ?? "Berlin TV tower at dusk"}
-                  fill
-                  sizes="260px"
-                  className="object-cover"
-                />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {badges.map((b) => (
-                  <span
-                    key={b}
-                    className="font-geist bg-secondary text-secondary-foreground rounded-full px-2.5 py-0.5 text-sm font-semibold"
-                  >
-                    {b}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </Panel>
-        </Step>
-
-        <Step
-          title="See a new life"
-          text="Explore each area with custom maps, local spots and clear trade-offs."
-        >
-          <Panel className="aspect-[556/468] min-h-0 sm:h-auto">
-            <Image
-              src={map}
-              alt="Map of a Berlin neighbourhood with a route to a Kita"
-              className="absolute object-cover dark:brightness-90"
-              style={pct(68, 36, 420, 395)}
-              sizes="420px"
-            />
-            {/* eslint-disable-next-line @next/next/no-img-element -- tiny decorative SVGs */}
-            <img
-              src="/home/route.svg"
-              alt=""
-              className="absolute"
-              style={pct(276.5, 209.5, 121.5, 67.5)}
-            />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/home/pin-shadow-outer.svg"
-              alt=""
-              className="absolute"
-              style={pct(265, 268, 24, 13)}
-            />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/home/pin.svg"
-              alt=""
-              className="absolute"
-              style={pct(266.93, 224, 20.13, 50.23)}
-            />
-            <span
-              className="absolute rounded-full bg-white px-3 py-2 text-sm text-neutral-900 shadow-lg sm:text-base"
-              style={{
-                left: `${(206 / 556) * 100}%`,
-                top: `${(217 / 468) * 100}%`,
-              }}
-            >
-              Kita
-            </span>
-          </Panel>
-        </Step>
-      </div>
+      {TRACKS.map((track) => (
+        <div key={track.label} className="flex flex-col gap-5">
+          <h3 className="text-brand-600 border-border border-b pb-5 text-lg font-medium">
+            {track.label}
+          </h3>
+          <ol className="grid gap-x-16 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
+            {track.steps.map((s) => (
+              <li key={s.title} className="flex flex-col gap-5">
+                <p className="text-heading text-[28px] leading-[1.1] font-medium">
+                  {s.title}
+                </p>
+                <p className="text-muted-foreground text-lg">{s.text}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))}
     </section>
   )
 }

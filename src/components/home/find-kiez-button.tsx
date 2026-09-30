@@ -1,23 +1,17 @@
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { ArrowRightIcon } from "lucide-react"
+import { CtaLink } from "@/components/home/cta-link"
 
 /** The orange "Find my Kiez →" pill: starts the Kiez finder. */
 export function FindKiezButton({
-  size = "pill-lg",
+  label = "Find my Kiez",
   className,
 }: {
-  size?: "pill" | "pill-lg"
+  label?: string
   className?: string
 }) {
   return (
-    <Button
-      size={size}
-      nativeButton={false}
-      render={<Link href="/find" />}
-      className={cn("hover:bg-primary/90", className)}
-    >
-      Find my Kiez →
-    </Button>
+    <CtaLink href="/find" icon={<ArrowRightIcon />} className={className}>
+      {label}
+    </CtaLink>
   )
 }
