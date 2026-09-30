@@ -4,17 +4,11 @@ import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState, useTransition } from "react"
-import {
-  ArrowLeftIcon,
-  DicesIcon,
-  LockIcon,
-  ShieldCheckIcon,
-} from "lucide-react"
+import { ArrowLeftIcon, DicesIcon, ShieldCheckIcon } from "lucide-react"
 import { toast } from "sonner"
 import {
   commitFairPickAction,
   revealFairPickAction,
-  type FairPickCommit,
 } from "@/app/landlord/actions"
 import { SiteNav } from "@/components/home/site-nav"
 import { FairnessAuditPanel } from "@/components/landlord/fairness-audit-panel"
@@ -169,12 +163,10 @@ function ApplicantRow({
   )
 }
 
-const short = (hash: string) => `${hash.slice(0, 12)}…${hash.slice(-6)}`
-
 /**
- * Fair Pick (lib/fair-pick.ts): commit to a random seed by showing its hash,
- * then reveal it. The revealed seed goes into the URL, so the order is
- * reproducible and anyone can check it.
+ * Fair Pick (lib/fair-pick.ts): one click commits to a random seed and reveals it
+ * (commit–reveal stays server-side). The seed goes into the URL, so the order is
+ * reproducible; the internals are not shown to the landlord.
  */
 function FairPick({
   flat,
@@ -186,36 +178,21 @@ function FairPick({
   draw: { seed: string; seedHash: string; pool: string } | null
 }) {
   const router = useRouter()
-  const [commit, setCommit] = useState<Extract<
-    FairPickCommit,
-    { ok: true }
-  > | null>(null)
   const [busy, start] = useTransition()
   const query = flatSettingsToParams({ ...flat, seed: undefined })
 
   if (draw)
     return (
-      <div className="bg-secondary flex flex-col gap-3 rounded-2xl p-5 text-sm leading-normal">
+      <div className="bg-secondary flex flex-col gap-2 rounded-2xl p-5 leading-normal">
         <p className="text-heading flex items-center gap-2 text-base font-bold">
           <ShieldCheckIcon aria-hidden className="text-brand-600 size-5" />
           Fair Pick drawn among {qualified.toLocaleString("en")} qualifying{" "}
           {qualified === 1 ? "household" : "households"}
         </p>
-        <p className="text-foreground">
-          Seed <code className="break-all">{draw.seed}</code>
-        </p>
-        <p className="text-foreground">
-          SHA-256 of the seed <code className="break-all">{draw.seedHash}</code>
-          {commit &&
-            (commit.hash === draw.seedHash
-              ? " · matches the hash committed before the draw ✓"
-              : " · does not match the commitment")}
-        </p>
-        <p className="text-subtle">
-          The order is every qualifying application id sorted by
-          SHA-256(seed:id). Check the hash yourself with{" "}
-          <code>echo -n SEED | shasum -a 256</code>. In a live listing the hash
-          goes to every applicant before the draw, so redrawing would show.
+        <p className="text-subtle text-sm">
+          Everyone who meets your requirements had the same chance. The order
+          was fixed before the draw and can be checked, so it can’t be redrawn
+          or adjusted.
         </p>
       </div>
     )
@@ -233,32 +210,15 @@ function FairPick({
             : "Nobody meets every requirement yet, so there is nothing to draw."}
         </p>
       </div>
-      {commit && (
-        <p className="text-foreground flex items-start gap-2 text-sm">
-          <LockIcon
-            aria-hidden
-            className="text-brand-600 mt-0.5 size-4 shrink-0"
-          />
-          <span>
-            Committed at{" "}
-            {new Date(commit.committedAt).toLocaleTimeString("en-GB")}: the seed
-            is fixed and hidden, its SHA-256 is{" "}
-            <code className="break-all">{short(commit.hash)}</code>. Pool of{" "}
-            {commit.poolSize.toLocaleString("en")}, fingerprint{" "}
-            <code>{short(commit.pool)}</code>.
-          </span>
-        </p>
-      )}
       {qualified > 0 && (
         <Button
           type="button"
           disabled={busy}
           onClick={() =>
             start(async () => {
-              if (!commit) {
-                const res = await commitFairPickAction(query)
-                if (res.ok) setCommit(res)
-                else toast.error(res.error)
+              const commit = await commitFairPickAction(query)
+              if (!commit.ok) {
+                toast.error(commit.error)
                 return
               }
               const res = await revealFairPickAction({
@@ -266,7 +226,6 @@ function FairPick({
                 query,
               })
               if (!res.ok) {
-                setCommit(null)
                 toast.error(res.error)
                 return
               }
@@ -278,13 +237,7 @@ function FairPick({
           }
           className="bg-brand-500 hover:bg-brand-500/90 h-auto self-start rounded-full px-6 py-3 text-base font-bold text-white"
         >
-          {busy
-            ? commit
-              ? "Drawing…"
-              : "Committing…"
-            : commit
-              ? "Reveal the seed and draw"
-              : "1. Commit to a random seed"}
+          {busy ? "Drawing…" : "Run Fair Pick"}
         </Button>
       )}
     </div>
