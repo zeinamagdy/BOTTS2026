@@ -4,9 +4,11 @@ import { z } from "zod"
 import { FAST_MODEL, getOpenAI } from "@/lib/ai"
 import { env } from "@/lib/env"
 import {
+  cleanExtras,
   effectivePicks,
   HOBBIES,
   INTERESTS,
+  LEVELS,
   isPoiHobby,
   levelWeight,
   MUST_HAVES,
@@ -180,4 +182,74 @@ export async function suggestPicks(
   if (cache.size >= 200) cache.delete(cache.keys().next().value!)
   cache.set(key, out)
   return out
+}
+
+// ─── "Refine" on the results page ───────────────────────────────────────────
+
+const levelLabel = (l: Picks["levels"][PriorityKey]) =>
+  LEVELS.find((x) => x.value === l)!.label
+const interestLabel = (h: string) =>
+  INTERESTS.find((i) => i.value === h)?.label ?? h
+const mustLabel = (m: string) =>
+  MUST_HAVES.find((x) => x.value === m)?.label ?? m
+
+/** What the refine changed, in words ("Affordable rent: Flexible → Must have") */
+export function describeChanges(
+  before: Picks,
+  after: Picks,
+  extrasBefore: readonly string[],
+  extrasAfter: readonly string[],
+) {
+  const out: string[] = []
+  for (const k of PRIORITY_KEYS)
+    if (before.levels[k] !== after.levels[k])
+      out.push(
+        `${PRIORITY_META[k].label}: ${levelLabel(before.levels[k])} → ${levelLabel(after.levels[k])}`,
+      )
+  const added = <T>(a: readonly T[], b: readonly T[]) =>
+    b.filter((x) => !a.includes(x))
+  for (const h of added(before.hobbies, after.hobbies))
+    out.push(`Nearby: ${interestLabel(h)} added`)
+  for (const h of added(after.hobbies, before.hobbies))
+    out.push(`Nearby: ${interestLabel(h)} removed`)
+  for (const m of added(before.must, after.must))
+    out.push(`Must have: ${mustLabel(m)}`)
+  for (const m of added(after.must, before.must))
+    out.push(`No longer required: ${mustLabel(m)}`)
+  if (before.maxRent !== after.maxRent)
+    out.push(
+      after.maxRent == null
+        ? "Rent cap removed"
+        : `Rent cap: max €${after.maxRent}/m² cold`,
+    )
+  const lower = extrasBefore.map((x) => x.toLowerCase())
+  for (const x of extrasAfter.filter((x) => !lower.includes(x.toLowerCase())))
+    out.push(`Looked up on the web: ${x}`)
+  return out
+}
+
+export const refineInput = suggestInput.extend({
+  extras: z.array(z.string().max(40)).max(10),
+})
+
+/**
+ * The results page's "Refine": the same text-to-picks step as the wizard, applied
+ * to the current picks. The model only changes the inputs; the ranking that
+ * follows is the usual deterministic one. New wishes it can't rank join the
+ * noted extras (newest kept first).
+ */
+export async function refinePicks(input: z.infer<typeof refineInput>) {
+  const { extras: before, ...rest } = input
+  const { picks, extras } = await suggestPicks(rest)
+  const merged = cleanExtras([...extras, ...before])
+  return {
+    picks,
+    extras: merged,
+    changes: describeChanges(
+      { ...input.current, maxRent: input.current.maxRent },
+      picks,
+      before,
+      merged,
+    ),
+  }
 }

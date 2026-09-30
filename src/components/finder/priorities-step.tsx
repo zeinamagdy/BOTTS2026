@@ -22,6 +22,7 @@ import { FIELD, StepButtons } from "@/components/finder/form-bits"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import {
+  cleanExtras,
   effectivePicks,
   FEATURED_KEYS,
   INTERESTS,
@@ -132,7 +133,6 @@ export function PrioritiesStep({
 
   const textRef = useRef<HTMLTextAreaElement>(null)
   const [needText, setNeedText] = useState(false)
-  const [extras, setExtras] = useState<string[]>([])
 
   const fillIn = () => {
     if (!state.priorities.trim()) {
@@ -155,8 +155,7 @@ export function PrioritiesStep({
       const changed = PRIORITY_KEYS.filter(
         (k) => res.picks.levels[k] !== picks.levels[k],
       )
-      set({ picks: res.picks })
-      setExtras(res.extras)
+      set({ picks: res.picks, extras: cleanExtras(res.extras) })
       setHighlight(changed)
       setPinned((p) => [
         ...new Set([...p, ...changed.filter((k) => HIDDEN_KEYS.includes(k))]),
@@ -282,9 +281,9 @@ export function PrioritiesStep({
           value={picks.hobbies}
           onChange={(hobbies) => setPicks({ hobbies })}
         />
-        {extras.length > 0 && (
+        {state.extras.length > 0 && (
           <ul className="flex flex-wrap items-center gap-2">
-            {extras.map((e) => (
+            {state.extras.map((e) => (
               <li
                 key={e}
                 className="text-faint border-input rounded-full border border-dashed px-3 py-1.5 text-sm"
@@ -293,7 +292,7 @@ export function PrioritiesStep({
               </li>
             ))}
             <li className="text-faint text-sm">
-              Noted, but we have no data on these yet
+              Noted: we can’t rank these, so the results look them up on the web
             </li>
           </ul>
         )}

@@ -2,7 +2,12 @@
 
 import { z } from "zod"
 import type { Picks } from "@/lib/finder-params"
-import { suggestInput, suggestPicks } from "@/lib/finder"
+import {
+  refineInput,
+  refinePicks,
+  suggestInput,
+  suggestPicks,
+} from "@/lib/finder"
 
 export type SuggestResult =
   { ok: true; picks: Picks; extras: string[] } | { ok: false; error: string }
@@ -24,6 +29,26 @@ export async function suggestPicksAction(
     return {
       ok: false,
       error: "Couldn't read your text right now. Pick below instead.",
+    }
+  }
+}
+
+export type RefineResult =
+  | { ok: true; picks: Picks; extras: string[]; changes: string[] }
+  | { ok: false; error: string }
+
+/** Results page "Refine": new picks from the person's text, plus what changed in words */
+export async function refineAction(input: unknown): Promise<RefineResult> {
+  const parsed = refineInput.safeParse(input)
+  if (!parsed.success)
+    return { ok: false, error: z.prettifyError(parsed.error) }
+  try {
+    return { ok: true, ...(await refinePicks(parsed.data)) }
+  } catch (err) {
+    console.error("refinePicks failed:", (err as Error).message)
+    return {
+      ok: false,
+      error: "Couldn't read that right now. Edit your answers instead.",
     }
   }
 }

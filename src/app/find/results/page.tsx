@@ -1,8 +1,11 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { connection } from "next/server"
+import { Suspense } from "react"
 import { ResultsShell } from "@/components/finder/finder-shell"
 import { MatchCard } from "@/components/finder/match-card"
+import { RefineBox } from "@/components/finder/refine-box"
+import { WebNote, WebNoteLoading } from "@/components/finder/web-note"
 import { ResultsMapLazy } from "@/components/finder/results-map-lazy"
 import { getFinderResults, type FinderResults } from "@/lib/finder"
 import {
@@ -38,6 +41,7 @@ function tags(s: FinderState, r: FinderResults) {
     ...r.understood.protect,
     ...r.understood.interestLabels,
     ...r.understood.mustHaves,
+    ...s.extras.map((x) => `${x} (from the web)`),
   ].filter(Boolean) as string[]
 }
 
@@ -113,6 +117,17 @@ export default async function ResultsPage({
       </ResultsShell>
     )
 
+  // One web lookup for all cards (deduplicated by `getWebFindings`)
+  const webAreas = JSON.stringify(
+    data.results.map((r) => ({
+      plrId: r.plrId,
+      name: r.plrName,
+      district: [r.ortsteil?.replace(/\s*\((Ort|Ortsteil)\)$/, ""), r.bezirk]
+        .filter(Boolean)
+        .join(", "),
+    })),
+  )
+
   // Not shown to the person: the commute check just leaves the place out
   const missing = data.places.filter((p) => !p.foundAs)
   if (missing.length)
@@ -149,6 +164,11 @@ export default async function ResultsPage({
         </ul>
       </div>
 
+      <RefineBox
+        state={s}
+        areas={data.results.map((r) => ({ plrId: r.plrId, name: r.plrName }))}
+      />
+
       {data.results.length > 0 ? (
         <ol className="grid gap-3.5 md:grid-cols-2 lg:grid-cols-3">
           {data.results.map((r) => (
@@ -160,6 +180,17 @@ export default async function ResultsPage({
               wanted={data.understood.wanted}
               maxCommute={s.commute}
               flatsHref={`/find/flats?${finderQuery(s, { plr: r.plrId })}`}
+              webNote={
+                s.extras.length > 0 && (
+                  <Suspense fallback={<WebNoteLoading wishes={s.extras} />}>
+                    <WebNote
+                      plrId={r.plrId}
+                      areasJson={webAreas}
+                      wishes={s.extras}
+                    />
+                  </Suspense>
+                )
+              }
             />
           ))}
         </ol>

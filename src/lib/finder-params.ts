@@ -196,6 +196,8 @@ export type FinderState = {
   picks: Picks | null
   /** Free text, only used to fill in `picks` */
   priorities: string
+  /** Wishes the ranking can't express ("dog park"): shown as noted, looked up on the web for the results */
+  extras: string[]
 }
 export const effectivePicks = (s: FinderState) => s.picks ?? householdPicks(s)
 
@@ -242,9 +244,23 @@ const schema = z.object({
     .optional()
     .catch(undefined),
   q: text(1000),
+  x: z
+    .array(z.string())
+    .catch([])
+    .transform((xs) => cleanExtras(xs)),
 })
 
-const ARRAY_PARAMS = ["place", "hobby", "must"] as const
+/** Up to `MAX_EXTRAS` short, distinct wish labels */
+export const MAX_EXTRAS = 3
+export function cleanExtras(xs: readonly string[]) {
+  const seen = new Set<string>()
+  return xs
+    .map((x) => x.replace(/\s+/g, " ").trim().slice(0, 40))
+    .filter((x) => x && !seen.has(x.toLowerCase()) && seen.add(x.toLowerCase()))
+    .slice(0, MAX_EXTRAS)
+}
+
+const ARRAY_PARAMS = ["place", "hobby", "must", "x"] as const
 
 function toObject(raw: RawParams) {
   const obj: Record<string, unknown> =
@@ -282,6 +298,7 @@ export function parseFinderParams(raw: RawParams): FinderState {
     commute: p.commute,
     picks: parsePicks(p),
     priorities: p.q,
+    extras: p.x,
   }
 }
 
@@ -303,6 +320,7 @@ export function finderQuery(s: FinderState, extra?: Record<string, string>) {
     if (s.picks.maxRent != null) q.set("rent", String(s.picks.maxRent))
   }
   if (s.priorities.trim()) q.set("q", s.priorities.trim())
+  for (const x of s.extras) q.append("x", x)
   for (const [k, v] of Object.entries(extra ?? {})) q.set(k, v)
   return q.toString()
 }

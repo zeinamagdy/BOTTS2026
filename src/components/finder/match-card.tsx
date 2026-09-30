@@ -1,5 +1,6 @@
 import Image from "next/image"
 import Link from "next/link"
+import type { ReactNode } from "react"
 import { BadgeAlertIcon, SquarePlusIcon } from "lucide-react"
 import { ShowAreaButton } from "@/components/finder/show-area-button"
 import { FactIcons } from "@/components/finder/fact-icons"
@@ -243,6 +244,7 @@ export function MatchCard({
   wanted,
   maxCommute,
   flatsHref,
+  webNote,
 }: {
   match: KiezMatch
   weights: Record<string, number>
@@ -251,6 +253,8 @@ export function MatchCard({
   maxCommute: number
   /** Example flats in this area, each with "Apply" */
   flatsHref: string
+  /** Web findings for the noted wishes (streams in), if there are any */
+  webNote?: ReactNode
 }) {
   const place = clean(m.ortsteil)
   const { benefit, tradeOff } = benefitAndTradeOff(m, weights, hobbies)
@@ -368,6 +372,8 @@ export function MatchCard({
         <Point icon={BadgeAlertIcon} title="Main trade-off">
           {tradeOff}
         </Point>
+
+        {webNote}
 
         <ShowAreaButton
           plrId={m.plrId}
