@@ -8,18 +8,20 @@ export const metadata: Metadata = {
   title: "Shortlist · For landlords · KiezKiss",
 }
 
-/** Step 3: the first qualified applicants, with the reasons and open points */
+/** Step 3: the first qualified applicants in the Fair Pick draw, with the reasons and open points */
 export default async function ShortlistPage({
   searchParams,
 }: PageProps<"/landlord/shortlist">) {
   await connection()
-  const { flat, inbox } = await loadLandlordInbox(await searchParams)
+  const { flat, inbox, draw } = await loadLandlordInbox(await searchParams)
   const noun = flat.type === "house" ? "house" : "flat"
   return (
     <Shortlist
       flat={flat}
       qualified={inbox.meets.length}
-      cards={explainShortlist(inbox.meets.slice(0, SHORTLIST), {
+      drawn={draw != null}
+      // Before the draw there is no shortlist: step 2 asks for Fair Pick first
+      cards={explainShortlist(draw ? inbox.meets.slice(0, SHORTLIST) : [], {
         rooms: flat.rooms,
         docs: flat.docs,
         noun,

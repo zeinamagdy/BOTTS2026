@@ -1,9 +1,12 @@
 import firstNames from "../../data/derived/berlin-first-names.json"
 import {
+  DEFAULT_INCOME_MULTIPLE,
   DEMO_FLAT,
   DOCUMENTS,
-  INCOME_FACTOR,
+  INCOME_MULTIPLES,
+  SAVINGS_MONTHS,
   type DocumentKey,
+  type FinancialRoute,
 } from "@/lib/landlord"
 
 /**
@@ -12,8 +15,9 @@ import {
  * the same flat settings always give the same inbox, which keeps the pitch
  * reproducible. Labelled as demo data in the UI.
  *
- * Only the requirements the landlord set are checked (income ≥ 3 × cold rent,
- * the chosen documents, the move-in date). Household and employment are shown
+ * Only the requirements the landlord set are checked: financial security (any
+ * one of four equal routes, see `FinancialRoute`), the chosen documents and the
+ * move-in date. Household and employment are shown
  * but never scored. The names are placeholders (see `SURNAMES`) and never
  * feed into anything.
  */
@@ -43,6 +47,13 @@ export type Applicant = {
   income: number | null
   /** Net income ÷ cold rent */
   ratio: number | null
+  hasGuarantor: boolean
+  /** Mietkautionsversicherung: an insurer stands in for the deposit */
+  hasDepositInsurance: boolean
+  /** Savings in €, rounded to hundreds */
+  savings: number
+  /** The financial-security routes this applicant meets (any one is enough) */
+  routes: FinancialRoute[]
   docsProvided: DocumentKey[]
   docsMissing: DocumentKey[]
   /** Self-employed only: latest tax assessment attached (null otherwise) */
@@ -101,7 +112,7 @@ function normal(r: () => number) {
  * Bulgaria, Vietnam, Italy, Romania, Serbia, Lebanon, Afghanistan, India).
  * Only forms that work for any gender (no Polish -ska, no Russian -ova).
  */
-const SURNAMES = {
+export const SURNAMES = {
   german: [
     "Müller",
     "Schmidt",
@@ -261,17 +272,45 @@ export function inboxSize(warmRent: number) {
   return { total, duplicates: Math.round(total * DUPLICATE_SHARE) }
 }
 
+/** What the landlord may ask for: 2–3 × the cold rent, anything else falls back to 3 */
+export function clampIncomeMultiple(m: number) {
+  return INCOME_MULTIPLES.find((x) => x === m) ?? DEFAULT_INCOME_MULTIPLE
+}
+
+export const ROUTE_LABEL: Record<FinancialRoute, string> = {
+  income: "income",
+  guarantor: "a guarantor",
+  depositInsurance: "deposit insurance",
+  savings: `savings of ${SAVINGS_MONTHS} months’ warm rent`,
+}
+
+/** Guarantors are common for students (usually parents), rare otherwise. Guesses for the demo */
+const GUARANTOR_RATE: Record<Employment, number> = {
+  Permanent: 0.04,
+  "Civil servant": 0.02,
+  "Fixed-term": 0.1,
+  "Self employed": 0.08,
+  Student: 0.55,
+  Retired: 0.02,
+}
+const DEPOSIT_INSURANCE_RATE = 0.08
+/** Share with no savings to speak of; the rest hold up to `MAX_SAVINGS_MONTHS` of warm rent */
+const NO_SAVINGS_SHARE = 0.55
+const MAX_SAVINGS_MONTHS = 5
+
 export function buildInbox({
   coldRent,
   warmRent,
   docs,
+  incomeMultiple = DEFAULT_INCOME_MULTIPLE,
 }: {
   coldRent: number
   warmRent: number
   docs: readonly DocumentKey[]
+  incomeMultiple?: number
 }): ApplicantInbox {
   const r = rng(2026)
-  const minIncome = coldRent * INCOME_FACTOR
+  const minIncome = coldRent * clampIncomeMultiple(incomeMultiple)
   const { total, duplicates } = inboxSize(warmRent)
   const incomeScale =
     warmRent > 0 ? (warmRent / DEMO_FLAT.warmRent) ** INCOME_SELF_SELECTION : 1
@@ -283,6 +322,8 @@ export function buildInbox({
   const xr = rng(1312)
   // Step 4 (the single application) draws from a fourth stream: 3 draws per applicant
   const dr = rng(1520)
+  // The alternative routes to financial security: a fifth stream, 3 draws per applicant
+  const fr = rng(2929)
   const usedNames = new Set<string>()
   const drawName = () => {
     for (;;) {
@@ -347,17 +388,41 @@ export function buildInbox({
     const tenureYears = 1 + Math.floor(dr() * 14)
     const variant = Math.floor(dr() * 2)
     const hiddenDraw = dr()
+    const hasGuarantor = fr() < GUARANTOR_RATE[employment]
+    const hasDepositInsurance = fr() < DEPOSIT_INSURANCE_RATE
+    const savingsDraw = fr()
+    const savings =
+      savingsDraw < NO_SAVINGS_SHARE
+        ? 0
+        : Math.round(
+            (((savingsDraw - NO_SAVINGS_SHARE) / (1 - NO_SAVINGS_SHARE)) *
+              MAX_SAVINGS_MONTHS *
+              warmRent) /
+              100,
+          ) * 100
+    const routes = (
+      [
+        ["income", income != null && income >= minIncome],
+        ["guarantor", hasGuarantor],
+        ["depositInsurance", hasDepositInsurance],
+        ["savings", warmRent > 0 && savings >= SAVINGS_MONTHS * warmRent],
+      ] as const
+    )
+      .filter(([, ok]) => ok)
+      .map(([route]) => route)
 
     const issues = [
-      ...(income == null ? ["Income not stated"] : []),
+      ...(income == null && !routes.length ? ["Income not stated"] : []),
       ...(docsMissing.length
         ? [`Missing ${docsMissing.map((k) => DOC_LABEL[k]).join(", ")}`]
         : []),
       ...(moveInOk ? [] : ["Later move-in"]),
       ...(consistent ? [] : ["Income differs from the payslips"]),
     ]
+    // Below only when no route is met: a low income with a guarantor, deposit
+    // insurance or enough savings is just as secure
     const bucket =
-      income != null && income < minIncome
+      income != null && !routes.length
         ? "below"
         : issues.length
           ? "check"
@@ -371,6 +436,10 @@ export function buildInbox({
       employment,
       income,
       ratio,
+      hasGuarantor,
+      hasDepositInsurance,
+      savings,
+      routes,
       docsProvided,
       docsMissing,
       taxAssessment,
@@ -394,8 +463,9 @@ export function buildInbox({
     })
   }
 
-  // First come, first served among those who qualify: ranking by income would
-  // always shortlist the richest household, although income only has to clear the bar
+  // Who applied first until the landlord runs Fair Pick (`orderByDraw` in
+  // fair-pick.ts). Never by income: that would always shortlist the richest
+  // household, although income only has to clear the bar
   const byTime = (a: Applicant, b: Applicant) =>
     a.receivedAfterH - b.receivedAfterH
   const meets = all.filter((a) => a.bucket === "meets").sort(byTime)
@@ -417,15 +487,15 @@ export function householdLabel(a: Pick<Applicant, "adults" | "children">) {
 /** How many qualified applicants the overview recommends and step 3 shortlists */
 export const SHORTLIST = 3
 
-/** Status line of steps 2 and 4; `rank` is the place among the qualified (-1 otherwise) */
+/** Status line of steps 2 and 4; `rank` is the place in the Fair Pick draw (-1 before the draw or when not qualified) */
 export function applicantStatus(a: Applicant, rank: number) {
   if (a.bucket === "meets")
     return rank === 0
-      ? "Top candidate"
-      : rank < SHORTLIST
-        ? "Recommended for review"
+      ? "Drawn first"
+      : rank >= 0 && rank < SHORTLIST
+        ? "Drawn for review"
         : "Meets requirements"
-  if (a.bucket === "below") return "Below the income requirement"
+  if (a.bucket === "below") return "No financial route met"
   return a.issues.join(" · ")
 }
 
@@ -437,14 +507,28 @@ export function explainShortlist(
   shortlist: readonly Applicant[],
   flat: { rooms: number; docs: readonly DocumentKey[]; noun: string },
 ) {
-  const lowest = Math.min(...shortlist.map((a) => a.ratio ?? Infinity))
+  const byIncome = shortlist.filter((a) => a.routes.includes("income"))
+  const lowest = Math.min(...byIncome.map((a) => a.ratio ?? Infinity))
   return shortlist.map((a) => {
     const reasons: string[] = []
     const toCheck: string[] = []
-    if (a.ratio != null)
+    if (a.routes.includes("income") && a.ratio != null)
       reasons.push(
         `Affordability threshold met: income is ${a.ratio.toFixed(1)} times the cold rent`,
       )
+    else if (a.routes.length) {
+      const via = a.routes.map((r) => ROUTE_LABEL[r])
+      reasons.push(
+        `Financial security through ${via.join(" and ")}, which counts the same as income`,
+      )
+      toCheck.push(
+        a.routes.includes("guarantor")
+          ? "Ask for the guarantor’s declaration and proof of income"
+          : a.routes.includes("depositInsurance")
+            ? "Ask for the deposit insurance certificate"
+            : "Ask for a recent bank statement showing the savings",
+      )
+    }
     if (a.employment === "Permanent") reasons.push("Permanent employment")
     if (a.employment === "Civil servant")
       reasons.push("Civil servant, permanent employment")
@@ -461,8 +545,6 @@ export function explainShortlist(
       toCheck.push(
         `Fixed-term contract, ends in ${a.contractMonthsLeft} months`,
       )
-    if (a.employment === "Student")
-      toCheck.push("Student: ask whether there is a guarantor")
 
     const people = a.adults + a.children
     if (people <= flat.rooms + 1)
@@ -477,9 +559,13 @@ export function explainShortlist(
       reasons.push(`${DOC_LABEL.rentDebt} provided`)
     if (a.consistent) reasons.push("No inconsistencies detected")
 
-    if (shortlist.length > 1 && a.ratio === lowest)
+    if (
+      byIncome.length > 1 &&
+      a.routes.includes("income") &&
+      a.ratio === lowest
+    )
       toCheck.push(
-        `Closest of the ${shortlist.length === 2 ? "two" : shortlist.length === 3 ? "three" : shortlist.length} to the affordability threshold`,
+        `Closest of the ${byIncome.length === 2 ? "two" : byIncome.length === 3 ? "three" : byIncome.length} to the affordability threshold`,
       )
     return { applicant: a, reasons, toCheck }
   })

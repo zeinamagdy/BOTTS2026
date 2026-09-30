@@ -1,5 +1,6 @@
 import "server-only"
 import { buildInbox } from "@/lib/applicants"
+import { orderByDraw, poolHash, sha256Hex } from "@/lib/fair-pick"
 import {
   coldRent,
   flatSettingsFromParams,
@@ -21,21 +22,33 @@ export async function loadFlatContext(
   }
 }
 
-/** Steps 2 and 3: the flat from the URL and the demo inbox checked against it */
+/**
+ * Steps 2–4: the flat from the URL and the demo inbox checked against it. With a
+ * revealed Fair Pick seed in the URL, the qualified applicants come in draw order.
+ */
 export async function loadLandlordInbox(
   params: Record<string, string | string[] | undefined>,
 ) {
   const flat = flatSettingsFromParams(params)
   const context = await loadFlatContext(flat)
   const cold = coldRent(flat.warmRent, flat.areaM2, context?.serviceChargePerM2)
+  const inbox = buildInbox({
+    coldRent: cold,
+    warmRent: flat.warmRent,
+    docs: flat.docs,
+    incomeMultiple: flat.incomeMultiple,
+  })
+  const pool = poolHash(inbox.meets.map((a) => a.id))
+  const draw = flat.seed
+    ? { seed: flat.seed, seedHash: sha256Hex(flat.seed), pool }
+    : null
+  if (flat.seed) inbox.meets = orderByDraw(flat.seed, inbox.meets)
   return {
     flat,
     street: context?.address ?? flat.address.split(",")[0],
     coldRent: cold,
-    inbox: buildInbox({
-      coldRent: cold,
-      warmRent: flat.warmRent,
-      docs: flat.docs,
-    }),
+    inbox,
+    pool,
+    draw,
   }
 }

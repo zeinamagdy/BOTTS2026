@@ -15,12 +15,14 @@ import {
   EuroIcon,
   HouseIcon,
   RulerIcon,
+  ShieldAlertIcon,
   SparklesIcon,
   type LucideIcon,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { flatContextAction, suggestFlatAction } from "@/app/landlord/actions"
+import { ToggleChips } from "@/components/finder/choice-group"
 import { FieldLabel } from "@/components/finder/finder-shell"
 import { FIELD } from "@/components/finder/form-bits"
 import { SiteNav } from "@/components/home/site-nav"
@@ -32,16 +34,20 @@ import {
   DOCUMENTS,
   FALLBACK_SERVICE_CHARGE_M2,
   flatSettingsToParams,
-  INCOME_FACTOR,
+  INCOME_MULTIPLES,
   MAX_AREA_M2,
   MIN_AREA_M2,
   PROPERTY_TYPES,
   ROOM_OPTIONS,
+  SAVINGS_MONTHS,
+  WELCOME,
   type DocumentKey,
   type FlatContext,
   type FlatSettings,
   type PropertyType,
+  type WelcomeKey,
 } from "@/lib/landlord"
+import { checkTenantCriteria, type CriterionMatch } from "@/lib/tenant-criteria"
 import { cn } from "@/lib/utils"
 import { Divider, eur, Heading, Progress } from "@/components/landlord/parts"
 import flatPhoto from "../../../public/landlord/flat.jpg"
@@ -233,6 +239,56 @@ function Filled({
   )
 }
 
+/**
+ * What the criteria check found in the landlord's own words. Deterministic
+ * phrase matching (tenant-criteria.ts); nothing typed here is ever applied.
+ */
+function CriteriaNotice({
+  matches,
+  id,
+  quiet,
+}: {
+  matches: CriterionMatch[]
+  id?: string
+  /** Say nothing when there is no match (the description box) */
+  quiet?: boolean
+}) {
+  if (!matches.length)
+    return quiet ? null : (
+      <p id={id} className="text-subtle text-sm leading-normal">
+        Noted for you, not checked: applicants are reviewed only on the fields
+        above. Nothing here matched our list of discriminatory criteria, which
+        is not legal clearance.
+      </p>
+    )
+  return (
+    <ul id={id} className="flex flex-col gap-3" aria-live="polite">
+      {matches.map(({ category: c, phrase }) => (
+        <li
+          key={c.key}
+          className="bg-secondary flex gap-3 rounded-2xl p-4 text-sm leading-normal"
+        >
+          <ShieldAlertIcon
+            aria-hidden
+            className="text-brand-600 mt-0.5 size-5 shrink-0"
+          />
+          <div className="flex flex-col gap-1">
+            <p className="text-heading font-bold">
+              {c.action === "refuse"
+                ? `We can’t apply “${phrase}”: ${c.label.toLowerCase()}.`
+                : `“${phrase}” isn’t applied: ${c.label.toLowerCase()}.`}
+            </p>
+            {c.alternative && (
+              <p className="text-foreground">{c.alternative}</p>
+            )}
+            <p className="text-subtle">{c.basis}</p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function ReviewRow({
   label,
   children,
@@ -272,6 +328,10 @@ export function FlatSetup({
   )
   const [rooms, setRooms] = useState(initial.rooms)
   const [docs, setDocs] = useState<DocumentKey[]>(initial.docs)
+  const [incomeMultiple, setIncomeMultiple] = useState(initial.incomeMultiple)
+  const [welcome, setWelcome] = useState<WelcomeKey[]>(initial.welcome)
+  // "Anything else you need from a tenant?": checked, never applied
+  const [wishes, setWishes] = useState("")
 
   // "Fill in from my text": the AI fills the fields below, the landlord adjusts them
   const [text, setText] = useState("")
@@ -292,7 +352,7 @@ export function FlatSetup({
   const warm = Number(rentText.replace(/\D/g, "")) || 0
   const area = Math.min(Number(areaText) || 0, MAX_AREA_M2)
   const cold = coldRent(warm, area, context?.serviceChargePerM2)
-  const minIncome = cold * INCOME_FACTOR
+  const minIncome = cold * incomeMultiple
   const noun = type === "house" ? "house" : "flat"
 
   // Re-read Wohnlage and comparables 600 ms after the last keystroke. The address
@@ -320,6 +380,9 @@ export function FlatSetup({
     }, 600)
     return () => clearTimeout(t)
   }, [address, lookupArea])
+
+  const textMatches = checkTenantCriteria(text)
+  const wishMatches = checkTenantCriteria([wishes, ...extras].join(" · "))
 
   const fillIn = () => {
     if (!text.trim()) {
@@ -447,6 +510,7 @@ export function FlatSetup({
                     Write a few words first, then we fill in the fields below.
                   </p>
                 )}
+                <CriteriaNotice matches={textMatches} quiet />
                 <Button
                   type="button"
                   variant="outline"
@@ -578,11 +642,84 @@ export function FlatSetup({
             <Divider />
 
             <div className="flex flex-col gap-8">
+              <Heading>How should tenants show they can pay?</Heading>
+              <div className="flex flex-col gap-6">
+                <p id={`${id}-mult`} className="text-heading">
+                  Net income at least … times the cold rent
+                </p>
+                <PillChoice
+                  options={INCOME_MULTIPLES.map((m) => ({
+                    value: m,
+                    label: `${m}×`,
+                  }))}
+                  value={incomeMultiple}
+                  onChange={setIncomeMultiple}
+                  labelledBy={`${id}-mult`}
+                />
+                <p className="text-muted-foreground leading-normal">
+                  Or any one of: a guarantor, deposit insurance, or savings
+                  covering {SAVINGS_MONTHS} months’ warm rent
+                  {warm ? ` (${eur(warm * SAVINGS_MONTHS)})` : ""}. Each route
+                  counts the same, so a freelancer, a student or someone new to
+                  Germany isn’t shut out by the kind of contract they have.
+                  Capped at 3× the cold rent.
+                </p>
+              </div>
+            </div>
+
+            <Divider />
+
+            <div className="flex flex-col gap-8">
+              <Heading>Who’s welcome?</Heading>
+              <div className="flex flex-col gap-4">
+                <p className="text-muted-foreground leading-normal">
+                  Shown in your ad to encourage people to apply. It never
+                  filters, scores or changes anyone’s chance in the draw.
+                </p>
+                <ToggleChips
+                  options={WELCOME.map((w) => ({
+                    value: w.key,
+                    label: w.label,
+                  }))}
+                  value={welcome}
+                  onChange={setWelcome}
+                  label="Who’s welcome"
+                />
+              </div>
+              <div className="flex flex-col gap-3">
+                <FieldLabel htmlFor={`${id}-wishes`}>
+                  Anything else you need from a tenant? (optional)
+                </FieldLabel>
+                <Textarea
+                  id={`${id}-wishes`}
+                  value={wishes}
+                  onChange={(e) => setWishes(e.target.value)}
+                  maxLength={500}
+                  aria-describedby={`${id}-wishes-check`}
+                  placeholder="e.g. quiet household, no pets, would like to meet in person first"
+                  className={cn(
+                    FIELD,
+                    "placeholder:text-faint field-sizing-fixed min-h-[88px] resize-y rounded-2xl placeholder:font-normal",
+                  )}
+                />
+                {(wishes.trim() || wishMatches.length > 0) && (
+                  <CriteriaNotice
+                    matches={wishMatches}
+                    id={`${id}-wishes-check`}
+                  />
+                )}
+              </div>
+            </div>
+
+            <Divider />
+
+            <div className="flex flex-col gap-8">
               <Heading>How applications will be reviewed</Heading>
               <div className="flex flex-col gap-6 text-lg leading-normal">
                 <ReviewRow label="Required">
-                  Net income at least three times the cold rent
-                  {area ? ` (${eur(minIncome)})` : ""},{" "}
+                  Net income at least {incomeMultiple}× the cold rent
+                  {area ? ` (${eur(minIncome)})` : ""} or a guarantor, deposit
+                  insurance or {SAVINGS_MONTHS} months’ rent in savings,{" "}
                   {docs.length
                     ? `the ${docs.length === 1 ? "document" : `${docs.length} documents`} you selected`
                     : "no documents"}
@@ -599,6 +736,10 @@ export function FlatSetup({
                   Protected characteristics, names, photos, nationality, writing
                   style or language.
                 </ReviewRow>
+                <ReviewRow label="Who gets a viewing">
+                  Fair Pick: a random draw among everyone who meets the
+                  requirements, verifiable by anyone. No hidden score.
+                </ReviewRow>
               </div>
             </div>
 
@@ -614,7 +755,7 @@ export function FlatSetup({
               disabled={!hasAddress || !warm || area < MIN_AREA_M2 || !rooms}
               onClick={() =>
                 router.push(
-                  `/landlord/applications?${flatSettingsToParams({ address, type, areaM2: area, warmRent: warm, rooms, docs })}`,
+                  `/landlord/applications?${flatSettingsToParams({ address, type, areaM2: area, warmRent: warm, rooms, docs, incomeMultiple, welcome })}`,
                 )
               }
               className="bg-brand-300 text-brand-700 hover:bg-brand-300/80 h-auto w-full rounded-full px-8 py-4 text-lg leading-normal font-bold"

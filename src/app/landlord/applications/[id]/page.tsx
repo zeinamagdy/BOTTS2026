@@ -23,12 +23,14 @@ export default async function ApplicationPage({
 }: PageProps<"/landlord/applications/[id]">) {
   await connection()
   const [{ id }, query] = await Promise.all([params, searchParams])
-  const { flat, inbox } = await loadLandlordInbox(query)
+  const { flat, inbox, draw } = await loadLandlordInbox(query)
   const noun = flat.type === "house" ? "house" : "flat"
 
-  const rank = inbox.meets.findIndex((a) => a.id === id)
+  const found = inbox.meets.findIndex((a) => a.id === id)
+  // A place in the draw only exists once Fair Pick has run
+  const rank = draw ? found : -1
   const a =
-    inbox.meets[rank] ??
+    inbox.meets[found] ??
     inbox.check.find((x) => x.id === id) ??
     inbox.below.find((x) => x.id === id)
   if (!a) notFound()

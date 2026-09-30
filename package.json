@@ -23,6 +23,7 @@
     "data:osm": "node scripts/fetch-osm.mjs",
     "data:photos": "node scripts/fetch-photos.mjs",
     "data:names": "node scripts/fetch-names.mjs",
+    "audit:fairness": "tsx --conditions=react-server scripts/fairness-audit.mts",
     "db:setup": "npm run data:fetch && npm run db:push -- --force && npm run db:seed"
   },
   "dependencies": {

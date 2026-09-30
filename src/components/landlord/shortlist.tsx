@@ -96,10 +96,12 @@ function ApplicantCard({
 export function Shortlist({
   flat,
   qualified,
+  drawn,
   cards,
 }: {
   flat: FlatSettings
   qualified: number
+  drawn: boolean
   cards: Card[]
 }) {
   const [invited, setInvited] = useState<string[]>([])
@@ -127,8 +129,10 @@ export function Shortlist({
           </h1>
           <p className="text-muted-foreground max-w-[560px] text-lg leading-normal">
             {cards.length
-              ? `${COUNT_WORD[cards.length] ?? `These ${cards.length}`} ${cards.length === 1 ? "meets" : "meet"} every requirement you set${qualified > cards.length ? `, and applied first of the ${qualified} who do` : ""}. We explain why; you decide who to invite. Nobody is rejected automatically.`
-              : "Nobody meets every requirement yet. Nobody is rejected automatically: the applications that need a check are still waiting in the overview."}
+              ? `${COUNT_WORD[cards.length] ?? `These ${cards.length}`} ${cards.length === 1 ? "meets" : "meet"} every requirement you set${qualified > cards.length ? `, and ${cards.length === 1 ? "was" : "were"} drawn first by Fair Pick from the ${qualified} who do` : ""}. We explain why; you decide who to invite. Nobody is rejected automatically.`
+              : !drawn && qualified
+                ? `${qualified.toLocaleString("en")} applicants meet every requirement. Run Fair Pick in the overview to draw who is shortlisted.`
+                : "Nobody meets every requirement yet. Nobody is rejected automatically: the applications that need a check are still waiting in the overview."}
           </p>
         </section>
 

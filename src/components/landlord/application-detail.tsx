@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import {
   DOC_LABEL,
   householdLabel,
+  ROUTE_LABEL,
   LATER_MOVE_IN,
   type Applicant,
   type NotePart,
@@ -36,9 +37,9 @@ function decisionText(a: Applicant, shortlisted: boolean) {
   if (a.bucket === "meets")
     return shortlisted
       ? "This applicant is recommended for review. Every requirement you set is met."
-      : "Every requirement you set is met. Others who qualify applied earlier, so this one is not on your shortlist yet."
+      : "Every requirement you set is met. It isn’t among the first Fair Pick drew for the shortlist (or you haven’t drawn yet)."
   if (a.bucket === "below")
-    return "The income is below the requirement you set. Nobody is rejected automatically, so the decision stays yours."
+    return "No route to financial security is met yet: income, a guarantor, deposit insurance or savings. Nobody is rejected automatically, so the decision stays yours."
   return "Some points are open. Settle them before you decide; nobody is rejected automatically."
 }
 
@@ -74,7 +75,9 @@ export function ApplicationDetail({
     ...(a.employment === "Self employed" && !a.taxAssessment
       ? ["the latest tax assessment"]
       : []),
-    ...(a.employment === "Student" ? ["a guarantor"] : []),
+    ...(a.routes.length
+      ? []
+      : ["a guarantor, deposit insurance or proof of savings"]),
   ]
 
   return (
@@ -132,6 +135,21 @@ export function ApplicationDetail({
                 <Fact
                   label="Move-in"
                   value={a.moveInOk ? DEMO_FLAT.moveIn : LATER_MOVE_IN}
+                />
+              </div>
+              <Divider />
+              <div className="flex gap-5">
+                <Fact
+                  label="Financial security"
+                  value={
+                    a.routes.length
+                      ? `Through ${a.routes.map((r) => ROUTE_LABEL[r]).join(", ")}`
+                      : "No route met yet"
+                  }
+                />
+                <Fact
+                  label="Savings"
+                  value={a.savings ? eur(a.savings) : "None stated"}
                 />
               </div>
             </div>
