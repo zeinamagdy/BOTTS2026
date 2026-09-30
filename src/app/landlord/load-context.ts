@@ -38,6 +38,8 @@ export async function loadLandlordInbox(
     warmRent: flat.warmRent,
     docs: flat.docs,
     incomeMultiple: flat.incomeMultiple,
+    nonSmoking: flat.nonSmoking,
+    moveInDate: DEMO_FLAT.moveInDate,
   }
   const inbox = buildInbox(req)
   // Numbered after the demo applicants, oldest first
@@ -52,7 +54,7 @@ export async function loadLandlordInbox(
   ).map((row, i, rows) =>
     applicantFromSubmission(
       row,
-      { ...req, moveInDate: DEMO_FLAT.moveInDate },
+      req,
       // Newest first from the DB, numbered in order of arrival
       first + rows.length - 1 - i,
     ),
@@ -68,6 +70,7 @@ export async function loadLandlordInbox(
     flat,
     street: context?.address ?? flat.address.split(",")[0],
     coldRent: cold,
+    req,
     inbox,
     submitted,
     pool,

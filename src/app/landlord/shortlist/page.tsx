@@ -13,11 +13,14 @@ export default async function ShortlistPage({
   searchParams,
 }: PageProps<"/landlord/shortlist">) {
   await connection()
-  const { flat, inbox, draw } = await loadLandlordInbox(await searchParams)
+  const { flat, street, inbox, draw } = await loadLandlordInbox(
+    await searchParams,
+  )
   const noun = flat.type === "house" ? "house" : "flat"
   return (
     <Shortlist
       flat={flat}
+      street={street}
       qualified={inbox.meets.length}
       drawn={draw != null}
       // Before the draw there is no shortlist: step 2 asks for Fair Pick first

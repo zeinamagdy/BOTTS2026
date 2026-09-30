@@ -2,11 +2,14 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import { ArrowLeftIcon, CheckIcon } from "lucide-react"
+import { ArrowLeftIcon, CalendarIcon, CheckIcon, MailIcon } from "lucide-react"
 import { toast } from "sonner"
 import { SiteNav } from "@/components/home/site-nav"
 import { Divider, Progress } from "@/components/landlord/parts"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { FieldLabel } from "@/components/finder/finder-shell"
+import { FIELD } from "@/components/finder/form-bits"
 import { householdLabel, type explainShortlist } from "@/lib/applicants"
 import { flatSettingsToParams, type FlatSettings } from "@/lib/landlord"
 import { cn } from "@/lib/utils"
@@ -14,6 +17,127 @@ import { cn } from "@/lib/utils"
 type Card = ReturnType<typeof explainShortlist>[number]
 
 const COUNT_WORD = ["No one", "This one", "These two", "These three"]
+
+/** "Saturday, 7 November 2026" */
+const longDate = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })
+
+/**
+ * One invitation for everyone drawn: a date and time, then an email draft.
+ * The draft has no recipients: the landlord sees only "Applicant N", so the
+ * live product would relay it without showing anyone's address. Nothing is sent
+ * from here.
+ */
+function ViewingDay({
+  street,
+  noun,
+  labels,
+  onInvite,
+}: {
+  street: string
+  noun: string
+  labels: string[]
+  onInvite: () => void
+}) {
+  const [day, setDay] = useState("")
+  const [time, setTime] = useState("17:00")
+  const ready = !!day && !!time
+  const body = [
+    "Hello,",
+    "",
+    `Thank you for applying for the ${noun} at ${street}. You were drawn for a viewing.`,
+    "",
+    `When: ${ready ? `${longDate(day)}, ${time}` : "[date and time]"}`,
+    `Where: ${street}`,
+    "",
+    "Please reply to confirm or to suggest another time. Bring your ID; the other documents you sent are enough.",
+    "",
+    "Kind regards",
+  ].join("\n")
+  const href = `mailto:?${new URLSearchParams({
+    subject: `Viewing: ${street}`,
+    body,
+  })
+    .toString()
+    .replace(/\+/g, "%20")}`
+
+  return (
+    <section className="bg-card flex flex-col gap-8 rounded-3xl p-5 sm:p-10">
+      <div className="flex flex-col gap-3">
+        <h2 className="text-heading text-2xl leading-[1.1] font-medium sm:text-[28px]">
+          Set up a viewing day
+        </h2>
+        <p className="text-muted-foreground text-lg leading-normal">
+          Invite {labels.join(", ")} to the same slot. You still decide after
+          the viewing.
+        </p>
+      </div>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div className="flex flex-col gap-3">
+          <FieldLabel htmlFor="viewing-day">Day</FieldLabel>
+          <Input
+            id="viewing-day"
+            type="date"
+            value={day}
+            min={new Date().toISOString().slice(0, 10)}
+            onChange={(e) => setDay(e.target.value)}
+            className={FIELD}
+          />
+        </div>
+        <div className="flex flex-col gap-3">
+          <FieldLabel htmlFor="viewing-time">Time</FieldLabel>
+          <Input
+            id="viewing-time"
+            type="time"
+            value={time}
+            step={900}
+            onChange={(e) => setTime(e.target.value)}
+            className={FIELD}
+          />
+        </div>
+      </div>
+      <pre className="bg-secondary text-foreground rounded-2xl p-5 font-sans text-base leading-normal whitespace-pre-wrap">
+        {body}
+      </pre>
+      <div className="flex flex-col gap-3">
+        <Button
+          nativeButton={false}
+          render={
+            <a
+              href={ready ? href : undefined}
+              aria-disabled={!ready}
+              onClick={(e) => {
+                if (!ready) {
+                  e.preventDefault()
+                  return
+                }
+                onInvite()
+              }}
+            />
+          }
+          className={cn(
+            "bg-brand-500 hover:bg-brand-500/90 h-auto self-start rounded-full px-8 py-4 text-lg font-bold text-white",
+            !ready && "pointer-events-none opacity-50",
+          )}
+        >
+          <MailIcon aria-hidden className="size-5" />
+          Email the invitation to all {labels.length}
+        </Button>
+        <p className="text-subtle flex items-start gap-2 text-sm">
+          <CalendarIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
+          Opens a draft in your email app without recipients: you never see
+          applicants’ addresses. In a live listing KiezKiss relays it to the
+          drawn households. Demo only, nothing is sent from here.
+        </p>
+      </div>
+    </section>
+  )
+}
 
 function ApplicantCard({
   card: { applicant: a, reasons, toCheck },
@@ -95,11 +219,13 @@ function ApplicantCard({
 
 export function Shortlist({
   flat,
+  street,
   qualified,
   drawn,
   cards,
 }: {
   flat: FlatSettings
+  street: string
   qualified: number
   drawn: boolean
   cards: Card[]
@@ -168,6 +294,20 @@ export function Shortlist({
           >
             Back to all applications
           </Button>
+        )}
+
+        {cards.length > 0 && (
+          <ViewingDay
+            street={street}
+            noun={flat.type === "house" ? "house" : "flat"}
+            labels={cards.map((c) => c.applicant.name)}
+            onInvite={() => {
+              setInvited(cards.map((c) => c.applicant.id))
+              toast("Invitation drafted for everyone drawn", {
+                description: "Demo only: nothing is sent from KiezKiss.",
+              })
+            }}
+          />
         )}
 
         <p className="text-subtle text-sm font-medium">

@@ -15,8 +15,8 @@ import {
  * reproducible. Labelled as demo data in the UI.
  *
  * Only the requirements the landlord set are checked: financial security (any
- * one of four equal routes, see `FinancialRoute`), the chosen documents and the
- * move-in date. Household and employment are shown
+ * one of four equal routes, see `FinancialRoute`), the chosen documents, the
+ * move-in date and, when the landlord asks for it, a non-smoking household. Household and employment are shown
  * but never scored. Nobody is shown by name: a name (and a surname especially)
  * hints at origin, so every applicant is a neutral label (`applicantLabel`).
  */
@@ -63,6 +63,8 @@ export type Applicant = {
   consistent: boolean
   /** Can move in on the flat's date */
   moveInOk: boolean
+  /** Someone in the household smokes; null when not stated (applications sent before the question existed) */
+  smoker: boolean | null
   /** Hours after the listing went online */
   receivedAfterH: number
   bucket: "meets" | "check" | "below"
@@ -96,6 +98,7 @@ export type Submission = {
   hasDepositInsurance: boolean
   savings: number
   moveIn: string
+  smoker: boolean | null
   documents: Record<
     string,
     { status: "verified" | "rejected" | "unchecked"; netIncome?: number | null }
@@ -174,6 +177,7 @@ export function applicantFromSubmission(
     docsProvided,
     consistent,
     moveInOk: s.moveIn <= req.moveInDate,
+    smoker: s.smoker,
   }
   const checked = checkApplicant(facts, req)
   const issues = [
@@ -314,6 +318,8 @@ const DEPOSIT_INSURANCE_RATE = 0.08
 /** Share with no savings to speak of; the rest hold up to `MAX_SAVINGS_MONTHS` of warm rent */
 const NO_SAVINGS_SHARE = 0.55
 const MAX_SAVINGS_MONTHS = 5
+/** Households with a smoker. A guess for the demo (roughly the German adult smoking rate) */
+const SMOKER_SHARE = 0.22
 
 /** What the requirement checks read about an applicant: never name, note or household */
 export type ApplicantFacts = Pick<
@@ -325,6 +331,7 @@ export type ApplicantFacts = Pick<
   | "docsProvided"
   | "consistent"
   | "moveInOk"
+  | "smoker"
 >
 
 export type Requirements = {
@@ -332,6 +339,7 @@ export type Requirements = {
   warmRent: number
   docs: readonly DocumentKey[]
   incomeMultiple?: number
+  nonSmoking?: boolean
 }
 
 /**
@@ -367,6 +375,10 @@ export function checkApplicant(f: ApplicantFacts, req: Requirements) {
       : []),
     ...(f.moveInOk ? [] : ["Later move-in"]),
     ...(f.consistent ? [] : ["Income differs from the payslips"]),
+    // A requirement like the documents: an open point, never an automatic rejection
+    ...(req.nonSmoking && f.smoker !== false
+      ? [f.smoker ? "Smoking household" : "Smoking not stated"]
+      : []),
   ]
   // Below only when no route is met: a low income with a guarantor, deposit
   // insurance or enough savings is just as secure
@@ -384,12 +396,8 @@ export function buildInbox({
   warmRent,
   docs,
   incomeMultiple = DEFAULT_INCOME_MULTIPLE,
-}: {
-  coldRent: number
-  warmRent: number
-  docs: readonly DocumentKey[]
-  incomeMultiple?: number
-}): ApplicantInbox {
+  nonSmoking = false,
+}: Requirements): ApplicantInbox {
   const r = rng(2026)
   const { total, duplicates } = inboxSize(warmRent)
   const incomeScale =
@@ -402,6 +410,8 @@ export function buildInbox({
   const dr = rng(1520)
   // The alternative routes to financial security: a fifth stream, 3 draws per applicant
   const fr = rng(2929)
+  // Smoking, added last: a sixth stream, 1 draw per applicant
+  const sr = rng(4747)
 
   for (let i = 0; i < unique; i++) {
     const employment = pick(r, [
@@ -467,6 +477,7 @@ export function buildInbox({
               warmRent) /
               100,
           ) * 100
+    const smoker = sr() < SMOKER_SHARE
     const { routes, ratio, docsMissing, issues, bucket } = checkApplicant(
       {
         income,
@@ -476,8 +487,9 @@ export function buildInbox({
         docsProvided,
         consistent,
         moveInOk,
+        smoker,
       },
-      { coldRent, warmRent, docs, incomeMultiple },
+      { coldRent, warmRent, docs, incomeMultiple, nonSmoking },
     )
 
     all.push({
@@ -498,6 +510,7 @@ export function buildInbox({
       contractMonthsLeft,
       consistent,
       moveInOk,
+      smoker,
       receivedAfterH: Math.round(r() * 72 * 10) / 10,
       tenureYears,
       note: {

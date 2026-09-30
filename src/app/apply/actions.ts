@@ -50,6 +50,7 @@ const application = z.object({
   hasDepositInsurance: z.boolean(),
   savings: z.number().int().min(0).max(10_000_000),
   moveIn: z.iso.date(),
+  smoker: z.boolean(),
   documents: z.partialRecord(
     z.enum(DOCUMENTS.map((d) => d.key) as [DocumentKey, ...DocumentKey[]]),
     documentCheck,

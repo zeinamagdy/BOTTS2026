@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { connection } from "next/server"
 import { loadLandlordInbox } from "@/app/landlord/load-context"
 import { ApplicationsOverview } from "@/components/landlord/applications-overview"
+import { auditFairness } from "@/lib/fairness-audit"
 
 export const metadata: Metadata = {
   title: "Applications · For landlords · KiezKiss",
@@ -12,7 +13,7 @@ export default async function ApplicationsPage({
   searchParams,
 }: PageProps<"/landlord/applications">) {
   await connection()
-  const { flat, street, coldRent, inbox, submitted, draw } =
+  const { flat, street, coldRent, req, inbox, submitted, draw } =
     await loadLandlordInbox(await searchParams)
   return (
     <ApplicationsOverview
@@ -22,6 +23,7 @@ export default async function ApplicationsPage({
       inbox={inbox}
       submitted={submitted}
       draw={draw}
+      audit={auditFairness(inbox, req)}
     />
   )
 }

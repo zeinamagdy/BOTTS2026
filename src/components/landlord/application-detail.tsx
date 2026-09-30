@@ -151,6 +151,27 @@ export function ApplicationDetail({
                   value={a.savings ? eur(a.savings) : "None stated"}
                 />
               </div>
+              <Divider />
+              <div className="flex gap-5">
+                <Fact
+                  label="Smoking"
+                  value={
+                    a.smoker == null
+                      ? "Not stated"
+                      : a.smoker
+                        ? "Someone smokes"
+                        : "Non-smoking household"
+                  }
+                />
+                <Fact
+                  label="Documents"
+                  value={
+                    flat.docs.length
+                      ? `${flat.docs.length - a.docsMissing.length} of ${flat.docs.length}`
+                      : "None asked"
+                  }
+                />
+              </div>
             </div>
             <Divider />
 

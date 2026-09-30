@@ -181,6 +181,7 @@ export function ApplyForm({
   const [insurance, setInsurance] = useState<"yes" | "no">("no")
   const [savingsText, setSavingsText] = useState("")
   const [moveIn, setMoveIn] = useState(moveInDate)
+  const [smoker, setSmoker] = useState<"yes" | "no">("no")
   const [docs, setDocs] = useState<Partial<Record<DocumentKey, DocState>>>({})
   const [answers, setAnswers] = useState({ household: "", why: "", other: "" })
   const [tone, setTone] = useState<"warm" | "formal">("warm")
@@ -258,6 +259,7 @@ export function ApplyForm({
     setInsurance("no")
     setSavingsText("")
     setMoveIn(moveInDate)
+    setSmoker("no")
     setAnswers({
       household:
         "I live on my own and work as a software developer in Adlershof.",
@@ -320,6 +322,7 @@ export function ApplyForm({
         hasDepositInsurance: insurance === "yes",
         savings,
         moveIn,
+        smoker: smoker === "yes",
         documents,
         coverLetter: letter,
         consent,
@@ -453,6 +456,17 @@ export function ApplyForm({
               value={children}
               onChange={setChildren}
               labelledBy={`${id}-children`}
+            />
+          </div>
+          <div className="flex flex-col gap-3">
+            <FieldLabel id={`${id}-smoker`}>
+              Does anyone moving in smoke?
+            </FieldLabel>
+            <ChoiceGroup
+              options={YES_NO}
+              value={smoker}
+              onChange={setSmoker}
+              labelledBy={`${id}-smoker`}
             />
           </div>
         </div>

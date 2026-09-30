@@ -59,6 +59,15 @@ export const FINANCIAL_ROUTES = [
 ] as const
 export type FinancialRoute = (typeof FINANCIAL_ROUTES)[number]
 
+/**
+ * "Non-smoking household only" is a requirement the landlord may set (smoking
+ * is no protected characteristic). Off by default; applicants state it in /apply
+ */
+export const SMOKING_OPTIONS = [
+  { value: "any", label: "No preference" },
+  { value: "no", label: "Non-smokers only" },
+] as const
+
 /** Who the ad says is welcome: shown to applicants, never filters or ranks anyone */
 export const WELCOME = [
   { key: "families", label: "Families with children" },
@@ -99,6 +108,8 @@ export type FlatSettings = {
   /** One of `INCOME_MULTIPLES` */
   incomeMultiple: number
   welcome: WelcomeKey[]
+  /** Only non-smoking households meet the requirements */
+  nonSmoking: boolean
   /** The revealed Fair Pick seed (64 hex characters), once the landlord has drawn */
   seed?: string
 }
@@ -112,6 +123,7 @@ export const DEMO_SETTINGS: FlatSettings = {
   docs: DEFAULT_DOCUMENTS,
   incomeMultiple: DEFAULT_INCOME_MULTIPLE,
   welcome: [],
+  nonSmoking: false,
 }
 
 export function flatSettingsToParams(s: FlatSettings) {
@@ -125,6 +137,7 @@ export function flatSettingsToParams(s: FlatSettings) {
     mult: String(s.incomeMultiple),
   })
   if (s.welcome.length) p.set("welcome", s.welcome.join(","))
+  if (s.nonSmoking) p.set("smoking", "no")
   if (s.seed) p.set("seed", s.seed)
   return p.toString()
 }
@@ -162,6 +175,7 @@ export function flatSettingsFromParams(p: Params): FlatSettings {
     incomeMultiple:
       INCOME_MULTIPLES.find((m) => m === mult) ?? DEFAULT_INCOME_MULTIPLE,
     welcome: WELCOME.map((w) => w.key).filter((k) => welcomeParam.includes(k)),
+    nonSmoking: one("smoking") === "no",
     ...(seed && SEED_PATTERN.test(seed) ? { seed } : {}),
   }
 }

@@ -17,6 +17,7 @@ import {
   type FairPickCommit,
 } from "@/app/landlord/actions"
 import { SiteNav } from "@/components/home/site-nav"
+import { FairnessAuditPanel } from "@/components/landlord/fairness-audit-panel"
 import { Divider, eur, Heading, Progress } from "@/components/landlord/parts"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,6 +28,7 @@ import {
   type Applicant,
   type ApplicantInbox,
 } from "@/lib/applicants"
+import type { FairnessAudit } from "@/lib/fairness-audit"
 import {
   DEMO_FLAT,
   flatSettingsToParams,
@@ -296,6 +298,7 @@ export function ApplicationsOverview({
   inbox,
   submitted,
   draw,
+  audit,
 }: {
   flat: FlatSettings
   street: string
@@ -304,6 +307,7 @@ export function ApplicationsOverview({
   /** Sent through /apply; also inside `inbox` */
   submitted: Applicant[]
   draw: { seed: string; seedHash: string; pool: string } | null
+  audit: FairnessAudit
 }) {
   const [filter, setFilter] = useState<FilterKey>("recommended")
   const [shown, setShown] = useState(PAGE)
@@ -390,7 +394,8 @@ export function ApplicationsOverview({
                 {flat.docs.length
                   ? listOf(flat.docs.map((k) => DOC_LABEL[k]))
                   : "no documents"}
-                , and a move-in from {DEMO_FLAT.moveIn}. Of the{" "}
+                {flat.nonSmoking ? ", a non-smoking household" : ""}, and a
+                move-in from {DEMO_FLAT.moveIn}. Of the{" "}
                 {(inbox.received - inbox.duplicatesMerged).toLocaleString("en")}{" "}
                 applications left after merging duplicates,{" "}
                 {inbox.below.length.toLocaleString("en")} meet none of the
@@ -456,6 +461,7 @@ export function ApplicationsOverview({
             )}
 
             <FairPick flat={flat} qualified={inbox.meets.length} draw={draw} />
+            <FairnessAuditPanel audit={audit} />
 
             <Divider />
 

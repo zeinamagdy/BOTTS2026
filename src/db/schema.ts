@@ -540,6 +540,8 @@ export const applications = pgTable(
     hasDepositInsurance: boolean("has_deposit_insurance").notNull(),
     savings: integer("savings").notNull(),
     moveIn: date("move_in").notNull(),
+    /** Someone in the household smokes; null for applications sent before the question existed */
+    smoker: boolean("smoker"),
     /** Document key → what the document check found (see `DocumentCheck` in documents.ts) */
     documents: jsonb("documents")
       .$type<

@@ -43,10 +43,13 @@ const suggestion = z.object({
   docs: z
     .array(docKey)
     .describe(DOCUMENTS.map((d) => `${d.key} = ${d.label}`).join("; ")),
+  nonSmoking: z
+    .boolean()
+    .describe("Only non-smoking households (Nichtraucher) are accepted"),
   extras: z
     .array(z.string())
     .describe(
-      "Up to 3 short labels (1-4 words) for other tenant wishes none of the fields cover, e.g. 'No pets', 'Non-smokers'. Empty if none.",
+      "Up to 3 short labels (1-4 words) for other tenant wishes none of the fields cover, e.g. 'No pets', 'Quiet household'. Empty if none.",
     ),
 })
 
@@ -58,6 +61,7 @@ A bare rent without either word is the warm rent. Convert "1.2k" → 1200.
 rooms: German counting, the kitchen and bathroom don't count ("3-Zimmer-Wohnung" → 3; "2 bedrooms and a living room" → 3).
 docs: return the current documents plus what the text asks for, minus what it rules out ("Schufa" → schufa, "payslips / Gehaltsnachweise" → payslips,
 "ID / Ausweis" → id, "work contract / Arbeitsvertrag" → contract, "Mietschuldenfreiheit / no rent arrears / landlord reference" → rentDebt).
+nonSmoking: true when they want non-smokers ("Nichtraucher", "no smoking"), false when they allow smoking, else the current value.
 extras: other tenant wishes we can't set as a field. Never include requirements about origin, religion, nationality, gender, age, family status, disability or names:
 those are protected characteristics; leave them out entirely.`
 
@@ -70,6 +74,7 @@ export const suggestFlatInput = z.object({
     warmRent: z.number().min(0).max(100_000),
     rooms: z.number().int().min(0).max(ROOM_OPTIONS.at(-1)!),
     docs: z.array(docKey),
+    nonSmoking: z.boolean(),
   }),
 })
 export type FlatSuggestion = {
@@ -81,6 +86,7 @@ export type FlatSuggestion = {
   coldRent: number | null
   rooms: number
   docs: DocumentKey[]
+  nonSmoking: boolean
   extras: string[]
 }
 
@@ -122,6 +128,7 @@ export async function suggestFlatSettings(
       s.coldRent != null && s.coldRent > 0 ? Math.round(s.coldRent) : null,
     rooms: within(s.rooms, 1, ROOM_OPTIONS.at(-1)!, current.rooms),
     docs: DOCUMENTS.map((d) => d.key).filter((k) => s.docs.includes(k)),
+    nonSmoking: s.nonSmoking,
     extras: s.extras.slice(0, 3),
   }
   if (cache.size >= 200) cache.delete(cache.keys().next().value!)

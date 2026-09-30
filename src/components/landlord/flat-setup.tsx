@@ -40,6 +40,7 @@ import {
   PROPERTY_TYPES,
   ROOM_OPTIONS,
   SAVINGS_MONTHS,
+  SMOKING_OPTIONS,
   WELCOME,
   type DocumentKey,
   type FlatContext,
@@ -214,7 +215,7 @@ function RentHint({
   )
 }
 
-type Field = "address" | "type" | "area" | "rent" | "rooms" | "docs"
+type Field = "address" | "type" | "area" | "rent" | "rooms" | "docs" | "smoking"
 
 /** Briefly tints a field the AI just filled in, like the finder's priority rows. */
 function Filled({
@@ -330,6 +331,7 @@ export function FlatSetup({
   const [docs, setDocs] = useState<DocumentKey[]>(initial.docs)
   const [incomeMultiple, setIncomeMultiple] = useState(initial.incomeMultiple)
   const [welcome, setWelcome] = useState<WelcomeKey[]>(initial.welcome)
+  const [nonSmoking, setNonSmoking] = useState(initial.nonSmoking)
   // "Anything else you need from a tenant?": checked, never applied
   const [wishes, setWishes] = useState("")
 
@@ -393,7 +395,15 @@ export function FlatSetup({
     startFilling(async () => {
       const res = await suggestFlatAction({
         text,
-        current: { address, type, areaM2: area, warmRent: warm, rooms, docs },
+        current: {
+          address,
+          type,
+          areaM2: area,
+          warmRent: warm,
+          rooms,
+          docs,
+          nonSmoking,
+        },
       })
       if (!res.ok) {
         toast.error(res.error)
@@ -419,6 +429,7 @@ export function FlatSetup({
           ["rent", nextWarm !== warm],
           ["rooms", res.rooms !== rooms],
           ["docs", !sameDocs],
+          ["smoking", res.nonSmoking !== nonSmoking],
         ] as const
       )
         .filter(([, c]) => c)
@@ -429,6 +440,7 @@ export function FlatSetup({
       setRentText(nextWarm ? nextWarm.toLocaleString("en") : "")
       setRooms(res.rooms)
       setDocs(res.docs)
+      setNonSmoking(res.nonSmoking)
       setExtras(res.extras)
       setHighlight(changed)
       toast.success(
@@ -621,6 +633,17 @@ export function FlatSetup({
                   />
                 ))}
               </Filled>
+              <Filled on={highlight.includes("smoking")} className="gap-6">
+                <p id={`${id}-smoking`} className="text-heading">
+                  Non-smoking household?
+                </p>
+                <PillChoice
+                  options={SMOKING_OPTIONS}
+                  value={nonSmoking ? "no" : "any"}
+                  onChange={(v) => setNonSmoking(v === "no")}
+                  labelledBy={`${id}-smoking`}
+                />
+              </Filled>
               {extras.length > 0 && (
                 <ul className="flex flex-wrap items-center gap-2">
                   {extras.map((e) => (
@@ -723,14 +746,16 @@ export function FlatSetup({
                   {docs.length
                     ? `the ${docs.length === 1 ? "document" : `${docs.length} documents`} you selected`
                     : "no documents"}
-                  , and a move-in from {DEMO_FLAT.moveIn}.
+                  {nonSmoking ? ", a non-smoking household" : ""}, and a move-in
+                  from {DEMO_FLAT.moveIn}.
                 </ReviewRow>
                 <ReviewRow label="Shown but not scored">
                   Household size
                   {rooms
                     ? ` for ${rooms} ${rooms === 1 ? "room" : "rooms"}`
                     : ""}
-                  , employment security, non-smoking household.
+                  , employment security
+                  {nonSmoking ? "" : ", smoking"}.
                 </ReviewRow>
                 <ReviewRow label="Never used">
                   Protected characteristics, names, photos, nationality, writing
@@ -755,7 +780,7 @@ export function FlatSetup({
               disabled={!hasAddress || !warm || area < MIN_AREA_M2 || !rooms}
               onClick={() =>
                 router.push(
-                  `/landlord/applications?${flatSettingsToParams({ address, type, areaM2: area, warmRent: warm, rooms, docs, incomeMultiple, welcome })}`,
+                  `/landlord/applications?${flatSettingsToParams({ address, type, areaM2: area, warmRent: warm, rooms, docs, incomeMultiple, welcome, nonSmoking })}`,
                 )
               }
               className="bg-brand-300 text-brand-700 hover:bg-brand-300/80 h-auto w-full rounded-full px-8 py-4 text-lg leading-normal font-bold"
