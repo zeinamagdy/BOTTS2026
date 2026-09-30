@@ -1,3 +1,4 @@
+import { LogoWordmark } from "@/components/home/site-nav"
 import { connection } from "next/server"
 import { DatabaseIcon } from "lucide-react"
 import { AssistantChat } from "@/components/dashboard/assistant-chat"
@@ -44,8 +45,8 @@ export default async function Home() {
       <header className="flex items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              KiezKiss
+            <h1>
+              <LogoWordmark className="h-7" />
             </h1>
             <Badge variant="secondary">MVP</Badge>
           </div>

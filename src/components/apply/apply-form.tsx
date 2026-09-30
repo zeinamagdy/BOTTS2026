@@ -24,9 +24,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { EMPLOYMENT, householdLabel, type Employment } from "@/lib/applicants"
 import {
   DEFAULT_INCOME_MULTIPLE,
-  DEMO_SETTINGS,
   DOCUMENTS,
-  flatSettingsToParams,
   SAVINGS_MONTHS,
   type DocumentKey,
 } from "@/lib/landlord"
@@ -348,20 +346,8 @@ export function ApplyForm({
         <div className="flex flex-wrap gap-3">
           <Button
             nativeButton={false}
-            render={
-              <Link
-                href={`/landlord/applications?${flatSettingsToParams(DEMO_SETTINGS)}`}
-              />
-            }
-            className="bg-brand-500 hover:bg-brand-500/90 h-auto rounded-full px-6 py-3 text-base font-bold text-white"
-          >
-            See it as the landlord
-          </Button>
-          <Button
-            variant="ghost"
-            nativeButton={false}
             render={<Link href={back} />}
-            className="h-auto rounded-full px-6 py-3 text-base font-bold"
+            className="bg-brand-500 hover:bg-brand-500/90 h-auto rounded-full px-6 py-3 text-base font-bold text-white"
           >
             Back to the flats
           </Button>

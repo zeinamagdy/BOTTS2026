@@ -150,6 +150,8 @@ const PHRASES: Record<string, { good: Phrase; weak: Phrase }> = {
   },
 }
 
+const NOT_A_TRADE_OFF = ["air"]
+
 /** Strongest and weakest of the person's weighted factors, as sentences. */
 function benefitAndTradeOff(
   m: KiezMatch,
@@ -162,7 +164,10 @@ function benefitAndTradeOff(
   const best = [...ranked].sort(
     (a, b) => b.score * b.w - a.score * a.w || b.score - a.score,
   )
-  const worst = [...ranked].sort((a, b) => a.score - b.score || b.w - a.w)
+  // Air quality is never the headline trade-off: a single Umweltatlas ordinal reads as a safety alarm
+  const worst = ranked
+    .filter((x) => !NOT_A_TRADE_OFF.includes(x.f))
+    .sort((a, b) => a.score - b.score || b.w - a.w)
   const say = (f: string, kind: "good" | "weak") =>
     PHRASES[f][kind](m.facts, hobbies)
 

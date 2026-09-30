@@ -46,94 +46,93 @@ export type PoiHobby = (typeof POI_HOBBIES)[number]
 export const isPoiHobby = (h: Hobby): h is PoiHobby =>
   (POI_HOBBIES as readonly string[]).includes(h)
 
-export const PRIORITY_GROUPS = [
-  "Family",
-  "Environment",
-  "Everyday life",
-  "Cost",
-] as const
-
 /**
- * Label, group and data source per ranking factor, in display order. Typed against the
- * `rankPlanungsraumInput` weights, so a new factor there fails the build until it is added here.
+ * Label and data source per ranking factor. Typed against the `rankPlanungsraumInput`
+ * weights, so a new factor there fails the build until it is added here.
  */
 export const PRIORITY_META: Record<
   PriorityKey,
-  { label: string; group: (typeof PRIORITY_GROUPS)[number]; hint: string }
+  { label: string; hint: string }
 > = {
   schools: {
     label: "Good schools",
-    group: "Family",
     hint: "Abitur results vs peer schools, Bezirk-level where the area has none",
   },
-  kitas: {
-    label: "Kita places",
-    group: "Family",
-    hint: "Kita places per child under 6",
-  },
+  kitas: { label: "Kita places", hint: "Kita places per child under 6" },
   safety: {
     label: "Safety",
-    group: "Family",
     hint: "Crime rate per 10,000 residents, Bezirk-level",
   },
-  noise: { label: "Quiet", group: "Environment", hint: "Umweltatlas noise" },
-  air: { label: "Clean air", group: "Environment", hint: "Umweltatlas air" },
-  green: {
-    label: "Green space",
-    group: "Environment",
-    hint: "Umweltatlas green-space supply",
-  },
-  heat: {
-    label: "Cool summers",
-    group: "Environment",
-    hint: "Umweltatlas heat stress",
-  },
+  noise: { label: "Quiet", hint: "Umweltatlas noise" },
+  air: { label: "Clean air", hint: "Umweltatlas air" },
+  green: { label: "Green space", hint: "Umweltatlas green-space supply" },
+  heat: { label: "Cool summers", hint: "Umweltatlas heat stress" },
   transit: {
     label: "Close to transit",
-    group: "Everyday life",
     hint: "Nearest U, S, tram or regional stop (VBB)",
   },
-  nearCenter: {
-    label: "Central",
-    group: "Everyday life",
-    hint: "Distance to Alexanderplatz",
-  },
+  nearCenter: { label: "Central", hint: "Distance to Alexanderplatz" },
   locationQuality: {
     label: "Good residential area",
-    group: "Everyday life",
     hint: "Share of 'gut' Wohnlage addresses (Mietspiegel)",
   },
   parks: {
     label: "Parks nearby",
-    group: "Everyday life",
     hint: "OpenStreetMap, within 1 km, per postcode",
   },
-  cafes: {
-    label: "Cafés",
-    group: "Everyday life",
-    hint: "OpenStreetMap, within 1 km, per postcode",
-  },
+  cafes: { label: "Cafés", hint: "OpenStreetMap, within 1 km, per postcode" },
   playgrounds: {
     label: "Playgrounds",
-    group: "Everyday life",
     hint: "OpenStreetMap, within 1 km, per postcode",
   },
   affordability: {
     label: "Affordable rent",
-    group: "Cost",
     hint: "Average cold rent per m² (synthetic listings)",
   },
 }
 export const PRIORITY_KEYS = Object.keys(PRIORITY_META) as PriorityKey[]
-/** Shown first; the rest sit behind "More priorities" */
-export const FEATURED_KEYS: PriorityKey[] = [
-  "schools",
-  "safety",
-  "noise",
-  "green",
-  "transit",
-  "affordability",
-]
+
+/**
+ * The four broad choices step 2 shows. Each sets the level of all its ranking factors
+ * at once; the factors in none of them stay Flexible unless the text says otherwise.
+ */
+export const SIMPLE_PRIORITIES = [
+  {
+    value: "family",
+    label: "Family-friendly",
+    hint: "Good schools, Kita places and a low crime rate",
+    keys: ["schools", "kitas", "safety"],
+  },
+  {
+    value: "green",
+    label: "Green spaces",
+    hint: "Parks, green space and quiet streets",
+    keys: ["green", "noise"],
+  },
+  {
+    value: "transit",
+    label: "Close to transit",
+    hint: "Nearest U, S, tram or regional stop (VBB)",
+    keys: ["transit"],
+  },
+  {
+    value: "affordable",
+    label: "Affordable rent",
+    hint: "Average cold rent per m² (synthetic listings)",
+    keys: ["affordability"],
+  },
+] as const satisfies readonly {
+  value: string
+  label: string
+  hint: string
+  keys: readonly PriorityKey[]
+}[]
+export type SimplePriority = (typeof SIMPLE_PRIORITIES)[number]
+/** Factors in none of the simple priorities: only the text box changes them */
+export const EXTRA_KEYS = PRIORITY_KEYS.filter(
+  (k) =>
+    !SIMPLE_PRIORITIES.some((p) => (p.keys as readonly string[]).includes(k)),
+)
 
 export const LEVELS = [
   { value: "protect", label: "Must have", weight: 5 },
@@ -146,12 +145,41 @@ export const levelWeight = (l: Level) =>
 const levelOfWeight = (w: number): Level | null =>
   LEVELS.find((x) => x.weight === w)?.value ?? null
 
+/** A simple priority's level: the strongest of its factors */
+export const groupLevel = (levels: Picks["levels"], p: SimplePriority) =>
+  LEVELS.map((l) => l.value).find((l) => p.keys.some((k) => levels[k] === l))!
+export const withGroupLevel = (
+  levels: Picks["levels"],
+  p: SimplePriority,
+  l: Level,
+) => ({
+  ...levels,
+  ...Object.fromEntries(p.keys.map((k) => [k, l])),
+})
+/** Every factor of a simple priority at the group's level, so the switch and the ranking agree */
+export const normaliseLevels = (levels: Picks["levels"]) =>
+  SIMPLE_PRIORITIES.reduce(
+    (acc, p) => withGroupLevel(acc, p, groupLevel(levels, p)),
+    levels,
+  )
+
+/** Labels of what sits at a level: the simple priorities, then any extra factor the text set */
+export function labelsAtLevel(levels: Picks["levels"], l: Level) {
+  return [
+    ...SIMPLE_PRIORITIES.filter((p) => groupLevel(levels, p) === l).map(
+      (p) => p.label,
+    ),
+    ...EXTRA_KEYS.filter((k) => levels[k] === l).map(
+      (k) => PRIORITY_META[k].label,
+    ),
+  ]
+}
+
 export const MUST_HAVES = [
   { value: "kita", label: "A Kita in the area" },
   { value: "kinderarzt", label: "A Kinderarzt (paediatrician) nearby" },
   { value: "playground", label: "A playground nearby" },
   { value: "park", label: "A park nearby" },
-  { value: "outsideRing", label: "Outside the S-Bahn Ring" },
 ] as const
 export type MustHave = (typeof MUST_HAVES)[number]["value"]
 const MUST_VALUES = MUST_HAVES.map((m) => m.value) as MustHave[]
@@ -171,11 +199,10 @@ export function householdPicks(s: { kids: number; expecting: boolean }): Picks {
   const levels = Object.fromEntries(
     PRIORITY_KEYS.map((k) => [k, "ok"]),
   ) as Picks["levels"]
-  if (s.kids > 0)
+  if (s.kids > 0 || s.expecting)
     Object.assign(levels, { schools: "protect", kitas: "protect" })
-  if (s.expecting) levels.kitas = "protect"
   return {
-    levels,
+    levels: normaliseLevels(levels),
     hobbies: [],
     must: s.expecting ? ["kita"] : [],
     maxRent: null,
@@ -282,6 +309,7 @@ function parsePicks(p: z.infer<typeof schema>): Picks | null {
     const level = levelOfWeight(Number(w))
     if (k in PRIORITY_META && level) picks.levels[k as PriorityKey] = level
   }
+  picks.levels = normaliseLevels(picks.levels)
   picks.hobbies = HOBBIES.filter((h) => p.hobby.includes(h))
   picks.must = MUST_VALUES.filter((m) => p.must.includes(m))
   picks.maxRent = p.rent ?? null

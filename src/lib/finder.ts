@@ -10,11 +10,16 @@ import {
   INTERESTS,
   LEVELS,
   isPoiHobby,
+  labelsAtLevel,
   levelWeight,
+  normaliseLevels,
   MUST_HAVES,
   PRIORITY_KEYS,
   PRIORITY_META,
   RENT_CAPS,
+  EXTRA_KEYS,
+  SIMPLE_PRIORITIES,
+  groupLevel,
   type FinderState,
   type Picks,
   type PriorityKey,
@@ -39,7 +44,8 @@ function picksToRank(p: Picks) {
     requireKinderarzt: p.must.includes("kinderarzt") || null,
     requirePlayground: p.must.includes("playground") || null,
     requirePark: p.must.includes("park") || null,
-    outsideRing: p.must.includes("outsideRing") || null,
+    // Always: the finder only suggests areas outside the S-Bahn Ring
+    outsideRing: true,
     maxRentPerM2: p.maxRent,
   }
 }
@@ -47,10 +53,6 @@ function picksToRank(p: Picks) {
 /** Everything the results page shows: the picks in words, plus the matching areas. */
 export async function getFinderResults(s: FinderState) {
   const picks = effectivePicks(s)
-  const labelsAt = (level: Picks["levels"][PriorityKey]) =>
-    PRIORITY_KEYS.filter((k) => picks.levels[k] === level).map(
-      (k) => PRIORITY_META[k].label,
-    )
   const matches = await findKiezMatches({
     rank: picksToRank(picks),
     places: s.places,
@@ -64,8 +66,8 @@ export async function getFinderResults(s: FinderState) {
   )
   return {
     understood: {
-      protect: labelsAt("protect"),
-      letGo: labelsAt("letgo"),
+      protect: labelsAtLevel(picks.levels, "protect"),
+      letGo: labelsAtLevel(picks.levels, "letgo"),
       mustHaves: [
         ...MUST_HAVES.filter((m) => picks.must.includes(m.value)).map(
           (m) => m.label,
@@ -123,10 +125,12 @@ You get their current settings. Return the full set, changing only what the text
 "protect" = Must have (they said it matters), "letgo" = Don't need (they said they can give it up or don't want it:
 "not central" → nearCenter letgo), "ok" = Flexible (neither). Keys the text doesn't mention keep their current value.
 Return the current hobbies and must-haves plus what the text adds, minus what it rules out.
+Nature, hiking, cycling, forests, parks, lakes or other outdoor activities mean green space matters: set green to "protect".
 hobbies: the things they like to have nearby (yoga, gym, bouldering, cafés, playgrounds, parks). Pick every one the text implies.
 must: only hard requirements they state ("must have a Kita nearby" → kita, "a paediatrician" → kinderarzt,
-"a playground close by" → playground, "a park nearby" → park, "outside the Ring" / "not in the city bustle" → outsideRing).
+"a playground close by" → playground, "a park nearby" → park). Liking nature or the outdoors is not a hard requirement.
 extras: wishes none of the above can express (e.g. "dog park", "sauna"); we can't rank them, but we show them as noted.
+Never list what green space already covers (nature, forest, hiking, cycling, outdoors) as extras.
 Set maxRentPerM2 only if they name a cold rent per m² cap. Commutes are handled elsewhere: ignore them.`
 
 // The model is not deterministic: the same text gives the same suggestion (per server instance)
@@ -173,7 +177,7 @@ export async function suggestPicks(
   const s = res.output_parsed
   if (!s) throw new Error("The AI gave no answer")
   const picks: Picks = {
-    levels: s.levels,
+    levels: normaliseLevels(s.levels),
     hobbies: s.hobbies,
     must: s.must,
     maxRent: snapRent(s.maxRentPerM2) ?? input.current.maxRent,
@@ -186,8 +190,8 @@ export async function suggestPicks(
 
 // ─── "Refine" on the results page ───────────────────────────────────────────
 
-const levelLabel = (l: Picks["levels"][PriorityKey]) =>
-  LEVELS.find((x) => x.value === l)!.label
+type Level = Picks["levels"][PriorityKey]
+const levelLabel = (l: Level) => LEVELS.find((x) => x.value === l)!.label
 const interestLabel = (h: string) =>
   INTERESTS.find((i) => i.value === h)?.label ?? h
 const mustLabel = (m: string) =>
@@ -201,11 +205,12 @@ export function describeChanges(
   extrasAfter: readonly string[],
 ) {
   const out: string[] = []
-  for (const k of PRIORITY_KEYS)
-    if (before.levels[k] !== after.levels[k])
-      out.push(
-        `${PRIORITY_META[k].label}: ${levelLabel(before.levels[k])} → ${levelLabel(after.levels[k])}`,
-      )
+  const change = (label: string, a: Level, b: Level) =>
+    a !== b && out.push(`${label}: ${levelLabel(a)} → ${levelLabel(b)}`)
+  for (const p of SIMPLE_PRIORITIES)
+    change(p.label, groupLevel(before.levels, p), groupLevel(after.levels, p))
+  for (const k of EXTRA_KEYS)
+    change(PRIORITY_META[k].label, before.levels[k], after.levels[k])
   const added = <T>(a: readonly T[], b: readonly T[]) =>
     b.filter((x) => !a.includes(x))
   for (const h of added(before.hobbies, after.hobbies))

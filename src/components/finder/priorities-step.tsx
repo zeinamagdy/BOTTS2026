@@ -8,7 +8,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react"
-import { ChevronDownIcon, SparklesIcon } from "lucide-react"
+import { SparklesIcon } from "lucide-react"
 import { toast } from "sonner"
 import { suggestPicksAction } from "@/app/find/actions"
 import { ChoiceGroup, ToggleChips } from "@/components/finder/choice-group"
@@ -24,50 +24,51 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   cleanExtras,
   effectivePicks,
-  FEATURED_KEYS,
+  EXTRA_KEYS,
+  groupLevel,
   INTERESTS,
   LEVELS,
   MUST_HAVES,
-  PRIORITY_GROUPS,
-  PRIORITY_KEYS,
   PRIORITY_META,
   RENT_CAPS,
+  SIMPLE_PRIORITIES,
+  withGroupLevel,
   type FinderState,
+  type Level,
   type Picks,
-  type PriorityKey,
+  type SimplePriority,
 } from "@/lib/finder-params"
 import { cn } from "@/lib/utils"
 
-const HIDDEN_KEYS = PRIORITY_KEYS.filter((k) => !FEATURED_KEYS.includes(k))
+type Simple = SimplePriority["value"]
 
 function PriorityRow({
-  k,
+  p,
   level,
   onChange,
   highlighted,
 }: {
-  k: PriorityKey
-  level: Picks["levels"][PriorityKey]
-  onChange: (l: Picks["levels"][PriorityKey]) => void
+  p: SimplePriority
+  level: Level
+  onChange: (l: Level) => void
   highlighted: boolean
 }) {
-  const meta = PRIORITY_META[k]
   return (
     <li
       className={cn(
-        "-mx-3 flex flex-col gap-2 rounded-lg px-3 py-2 transition-colors duration-700 sm:flex-row sm:items-center sm:justify-between sm:gap-4",
+        "-mx-3 flex flex-col gap-2 rounded-lg px-3 py-1.5 transition-colors duration-700 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-4",
         highlighted && "bg-secondary",
       )}
     >
       <div className="min-w-0">
         <p className="text-heading text-lg leading-normal font-medium">
-          {meta.label}
+          {p.label}
         </p>
-        <p className="text-subtle text-sm">{meta.hint}</p>
+        <p className="text-subtle text-sm">{p.hint}</p>
       </div>
       <div className="shrink-0">
         <ChoiceGroup
-          label={meta.label}
+          label={p.label}
           size="lg"
           options={LEVELS}
           value={level}
@@ -78,27 +79,23 @@ function PriorityRow({
   )
 }
 
-function Subsection({
-  title,
-  children,
-}: {
-  title: string
-  children: ReactNode
-}) {
+/** One group of choices as a compact card: tight inside, the page gap between groups */
+function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3.5">
+    <section className="bg-background flex flex-col gap-3 rounded-[20px] p-5 sm:p-6">
       <h3 className="text-heading text-xl leading-[1.1] font-medium">
         {title}
       </h3>
       {children}
-    </div>
+    </section>
   )
 }
 
 /**
- * Step 2, "What matters most?": one Must have / Flexible / Don't need switch per ranking key from
- * the database (`PRIORITY_META`), hobbies, must-haves and a rent cap. The optional text
- * box asks the AI to fill in the switches, which the person can then adjust.
+ * Step 2, "What matters most?": four broad Must have / Flexible / Don't need switches
+ * (`SIMPLE_PRIORITIES`, each covering one or more ranking factors), things nearby,
+ * must-haves and a rent cap. The optional text box asks the AI to fill in the switches;
+ * a priority it would raise to Must have is set to Flexible until the person confirms.
  */
 export function PrioritiesStep({
   state,
@@ -117,12 +114,9 @@ export function PrioritiesStep({
   const picks = effectivePicks(state)
   const setPicks = (patch: Partial<Picks>) =>
     set({ picks: { ...picks, ...patch } })
-  const [expanded, setExpanded] = useState(false)
-  // Extra keys that are not "OK" stay visible while collapsed (and keep showing if set back)
-  const [pinned, setPinned] = useState<PriorityKey[]>(() =>
-    HIDDEN_KEYS.filter((k) => picks.levels[k] !== "ok"),
-  )
-  const [highlight, setHighlight] = useState<PriorityKey[]>([])
+  const [highlight, setHighlight] = useState<Simple[]>([])
+  /** Suggested by the text as Must have, waiting for a yes */
+  const [confirm, setConfirm] = useState<Simple[]>([])
   const [filling, startFilling] = useTransition()
 
   useEffect(() => {
@@ -130,6 +124,11 @@ export function PrioritiesStep({
     const t = setTimeout(() => setHighlight([]), 2500)
     return () => clearTimeout(t)
   }, [highlight])
+
+  const setLevel = (p: SimplePriority, l: Level) => {
+    setPicks({ levels: withGroupLevel(picks.levels, p, l) })
+    setConfirm((c) => c.filter((v) => v !== p.value))
+  }
 
   const textRef = useRef<HTMLTextAreaElement>(null)
   const [needText, setNeedText] = useState(false)
@@ -152,26 +151,38 @@ export function PrioritiesStep({
         toast.error(res.error)
         return
       }
-      const changed = PRIORITY_KEYS.filter(
-        (k) => res.picks.levels[k] !== picks.levels[k],
-      )
-      set({ picks: res.picks, extras: cleanExtras(res.extras) })
-      setHighlight(changed)
-      setPinned((p) => [
-        ...new Set([...p, ...changed.filter((k) => HIDDEN_KEYS.includes(k))]),
-      ])
+      // A new Must have from the text is only a suggestion: Flexible until confirmed
+      let levels = res.picks.levels
+      const ask: Simple[] = []
+      for (const p of SIMPLE_PRIORITIES)
+        if (
+          groupLevel(levels, p) === "protect" &&
+          groupLevel(picks.levels, p) !== "protect"
+        ) {
+          levels = withGroupLevel(levels, p, "ok")
+          ask.push(p.value)
+        }
+      const changed = SIMPLE_PRIORITIES.filter(
+        (p) => groupLevel(levels, p) !== groupLevel(picks.levels, p),
+      ).map((p) => p.value)
+      set({
+        picks: { ...res.picks, levels },
+        extras: cleanExtras(res.extras),
+      })
+      setConfirm(ask)
+      setHighlight([...changed, ...ask])
       toast.success(
-        changed.length
-          ? `Filled in ${changed.length} ${changed.length === 1 ? "priority" : "priorities"} from your text. Adjust them below.`
-          : "Your text matches the current picks.",
+        ask.length
+          ? "Read your text. Confirm below what should be a Must have."
+          : changed.length
+            ? `Filled in ${changed.length} ${changed.length === 1 ? "priority" : "priorities"} from your text. Adjust them below.`
+            : "Your text matches the current picks.",
       )
     })
   }
 
-  const visible = PRIORITY_KEYS.filter(
-    (k) => expanded || FEATURED_KEYS.includes(k) || pinned.includes(k),
-  )
-  const more = PRIORITY_KEYS.length - visible.length
+  // Factors outside the four switches that the text moved away from Flexible
+  const extraSet = EXTRA_KEYS.filter((k) => picks.levels[k] !== "ok")
 
   return (
     <FinderShell
@@ -199,7 +210,7 @@ export function PrioritiesStep({
             maxLength={1000}
             aria-invalid={needText || undefined}
             aria-describedby={needText ? `${id}-need` : undefined}
-            placeholder="e.g. A quiet street and good schools matter most, and a park nearby. I can give up being central."
+            placeholder="e.g. Good schools matter most, and nature nearby for hiking and cycling. I can give up being central."
             // lighter and regular weight, so the example never reads as typed text
             className={cn(
               FIELD,
@@ -224,57 +235,83 @@ export function PrioritiesStep({
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
+      <Group title="Your priorities">
         {state.picks == null && (state.kids > 0 || state.expecting) && (
           <p className="text-subtle text-sm">
-            We started from your household: Kitas and schools are set to Must
-            have.
+            We started from your household: Family-friendly is set to Must have.
           </p>
         )}
-        {PRIORITY_GROUPS.map((g) => {
-          const keys = visible.filter((k) => PRIORITY_META[k].group === g)
-          if (!keys.length) return null
+        <ul className="@container flex flex-col gap-0.5">
+          {SIMPLE_PRIORITIES.map((p) => (
+            <PriorityRow
+              key={p.value}
+              p={p}
+              level={groupLevel(picks.levels, p)}
+              highlighted={highlight.includes(p.value)}
+              onChange={(l) => setLevel(p, l)}
+            />
+          ))}
+        </ul>
+        {confirm.map((v) => {
+          const p = SIMPLE_PRIORITIES.find((x) => x.value === v)!
           return (
-            <section key={g} className="flex flex-col gap-2">
-              <h3 className="text-subtle text-sm font-medium tracking-wide uppercase">
-                {g}
-              </h3>
-              <ul className="flex flex-col gap-1">
-                {keys.map((k) => (
-                  <PriorityRow
-                    key={k}
-                    k={k}
-                    level={picks.levels[k]}
-                    highlighted={highlight.includes(k)}
-                    onChange={(l) =>
-                      setPicks({ levels: { ...picks.levels, [k]: l } })
-                    }
-                  />
-                ))}
-              </ul>
-            </section>
+            <div
+              key={v}
+              role="status"
+              className="bg-secondary flex flex-col gap-3 rounded-[12px] p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <p className="text-heading text-base">
+                Your text suggests <strong>{p.label}</strong> matters. We set it
+                to Flexible. Make it a Must have?
+              </p>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  type="button"
+                  onClick={() => setLevel(p, "protect")}
+                  className="rounded-[10px]"
+                >
+                  Yes, Must have
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setLevel(p, "ok")}
+                  className="rounded-[10px]"
+                >
+                  Keep Flexible
+                </Button>
+              </div>
+            </div>
           )
         })}
-        {(expanded || more > 0) && (
-          <button
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((e) => !e)}
-            className="text-brand-600 flex items-center gap-1.5 self-start text-base font-bold hover:underline"
-          >
-            {expanded ? "Fewer priorities" : `More priorities (${more})`}
-            <ChevronDownIcon
-              aria-hidden
-              className={cn(
-                "size-5 transition-transform",
-                expanded && "rotate-180",
-              )}
-            />
-          </button>
+        {extraSet.length > 0 && (
+          <p className="text-subtle flex flex-wrap items-center gap-x-2 text-sm">
+            Also from your text:{" "}
+            {extraSet
+              .map(
+                (k) =>
+                  `${PRIORITY_META[k].label} (${LEVELS.find((l) => l.value === picks.levels[k])!.label})`,
+              )
+              .join(", ")}
+            <button
+              type="button"
+              onClick={() =>
+                setPicks({
+                  levels: {
+                    ...picks.levels,
+                    ...Object.fromEntries(extraSet.map((k) => [k, "ok"])),
+                  },
+                })
+              }
+              className="text-brand-600 font-bold hover:underline"
+            >
+              Reset
+            </button>
+          </p>
         )}
-      </div>
+      </Group>
 
-      <Subsection title="Nice to have nearby">
+      <Group title="Nice to have nearby">
         <ToggleChips
           label="Nice to have nearby"
           options={INTERESTS}
@@ -296,18 +333,18 @@ export function PrioritiesStep({
             </li>
           </ul>
         )}
-      </Subsection>
+      </Group>
 
-      <Subsection title="Must-haves">
+      <Group title="Must-haves">
         <ToggleChips
           label="Must-haves"
           options={MUST_HAVES}
           value={picks.must}
           onChange={(must) => setPicks({ must })}
         />
-      </Subsection>
+      </Group>
 
-      <Subsection title="Max cold rent per m²">
+      <Group title="Max cold rent per m²">
         <ChoiceGroup
           label="Max cold rent per m²"
           size="lg"
@@ -322,7 +359,7 @@ export function PrioritiesStep({
           Average of synthetic listings, 25–40% below the real market. Median
           across Berlin: €11.90.
         </p>
-      </Subsection>
+      </Group>
 
       <StepButtons
         back={onBack}
