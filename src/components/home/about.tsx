@@ -1,3 +1,5 @@
+import { LogoWordmark } from "@/components/home/site-nav"
+
 export function About() {
   return (
     <section
@@ -22,9 +24,7 @@ export function SiteFooter() {
   return (
     <footer className="border-border flex flex-col gap-3 border-t py-8 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-6">
-        <p className="text-heading text-[28px] leading-[1.1] font-medium">
-          KiezKiss
-        </p>
+        <LogoWordmark className="text-heading h-8" />
         <p className="text-muted-foreground text-lg">
           Where renters, landlords and neighbourhoods match.
         </p>
