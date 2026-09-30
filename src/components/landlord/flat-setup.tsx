@@ -6,6 +6,7 @@ import {
   useId,
   useRef,
   useState,
+  useTransition,
   type ComponentProps,
   type ReactNode,
 } from "react"
@@ -14,17 +15,22 @@ import {
   EuroIcon,
   HouseIcon,
   RulerIcon,
+  SparklesIcon,
   type LucideIcon,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { flatContextAction } from "@/app/landlord/actions"
+import { toast } from "sonner"
+import { flatContextAction, suggestFlatAction } from "@/app/landlord/actions"
 import { FieldLabel } from "@/components/finder/finder-shell"
+import { FIELD } from "@/components/finder/form-bits"
 import { SiteNav } from "@/components/home/site-nav"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 import {
   coldRent,
   DEMO_FLAT,
   DOCUMENTS,
+  FALLBACK_SERVICE_CHARGE_M2,
   flatSettingsToParams,
   INCOME_FACTOR,
   MAX_AREA_M2,
@@ -202,6 +208,31 @@ function RentHint({
   )
 }
 
+type Field = "address" | "type" | "area" | "rent" | "rooms" | "docs"
+
+/** Briefly tints a field the AI just filled in, like the finder's priority rows. */
+function Filled({
+  on,
+  className,
+  children,
+}: {
+  on: boolean
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        "-mx-3 flex flex-col rounded-2xl px-3 py-2 transition-colors duration-700",
+        on && "bg-secondary",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
 function ReviewRow({
   label,
   children,
@@ -242,6 +273,19 @@ export function FlatSetup({
   const [rooms, setRooms] = useState(initial.rooms)
   const [docs, setDocs] = useState<DocumentKey[]>(initial.docs)
 
+  // "Fill in from my text": the AI fills the fields below, the landlord adjusts them
+  const [text, setText] = useState("")
+  const [needText, setNeedText] = useState(false)
+  const [extras, setExtras] = useState<string[]>([])
+  const [highlight, setHighlight] = useState<Field[]>([])
+  const [filling, startFilling] = useTransition()
+  const textRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!highlight.length) return
+    const t = setTimeout(() => setHighlight([]), 2500)
+    return () => clearTimeout(t)
+  }, [highlight])
+
   // Too short to look up: ignore what an earlier address returned
   const hasAddress = address.trim().length >= 3
   const context = hasAddress ? fetchedContext : null
@@ -276,6 +320,65 @@ export function FlatSetup({
     }, 600)
     return () => clearTimeout(t)
   }, [address, lookupArea])
+
+  const fillIn = () => {
+    if (!text.trim()) {
+      setNeedText(true)
+      textRef.current?.focus()
+      return
+    }
+    startFilling(async () => {
+      const res = await suggestFlatAction({
+        text,
+        current: { address, type, areaM2: area, warmRent: warm, rooms, docs },
+      })
+      if (!res.ok) {
+        toast.error(res.error)
+        return
+      }
+      // A cold rent becomes warm with the PLZ's median service charge, as the rent hint does
+      const nextWarm =
+        res.coldRent != null && res.areaM2
+          ? Math.round(
+              res.coldRent +
+                (context?.serviceChargePerM2 ?? FALLBACK_SERVICE_CHARGE_M2) *
+                  res.areaM2,
+            )
+          : res.warmRent
+      const sameDocs =
+        res.docs.length === docs.length &&
+        res.docs.every((d) => docs.includes(d))
+      const changed = (
+        [
+          ["address", res.address !== address],
+          ["type", res.type !== type],
+          ["area", res.areaM2 !== area],
+          ["rent", nextWarm !== warm],
+          ["rooms", res.rooms !== rooms],
+          ["docs", !sameDocs],
+        ] as const
+      )
+        .filter(([, c]) => c)
+        .map(([f]) => f)
+      setAddress(res.address)
+      setType(res.type)
+      setAreaText(res.areaM2 ? String(res.areaM2) : "")
+      setRentText(nextWarm ? nextWarm.toLocaleString("en") : "")
+      setRooms(res.rooms)
+      setDocs(res.docs)
+      setExtras(res.extras)
+      setHighlight(changed)
+      toast.success(
+        changed.length
+          ? `Filled in ${changed.length} ${changed.length === 1 ? "field" : "fields"} from your text. Check them below.`
+          : "Your text matches the fields already.",
+      )
+      if (res.coldRent != null && !res.areaM2)
+        toast.info(
+          "Add the living space so we can turn the cold rent into warm.",
+        )
+    })
+  }
 
   return (
     <main className="flex flex-1 flex-col">
@@ -319,6 +422,43 @@ export function FlatSetup({
             <div className="flex flex-col gap-8">
               <Heading>Let’s speak about the {noun}</Heading>
               <div className="flex flex-col gap-3">
+                <FieldLabel htmlFor={`${id}-text`}>
+                  Describe it in your own words (optional)
+                </FieldLabel>
+                <Textarea
+                  id={`${id}-text`}
+                  ref={textRef}
+                  value={text}
+                  onChange={(e) => {
+                    setText(e.target.value)
+                    setNeedText(false)
+                  }}
+                  maxLength={1000}
+                  aria-invalid={needText || undefined}
+                  aria-describedby={needText ? `${id}-need` : undefined}
+                  placeholder="e.g. 3-room flat, 79 m², Baumschulenstraße 84 in 12437. €1,480 warm. I need a SCHUFA, payslips and a Mietschuldenfreiheitsbescheinigung."
+                  className={cn(
+                    FIELD,
+                    "placeholder:text-faint field-sizing-fixed min-h-[120px] resize-y rounded-2xl placeholder:font-normal",
+                  )}
+                />
+                {needText && (
+                  <p id={`${id}-need`} className="text-destructive text-sm">
+                    Write a few words first, then we fill in the fields below.
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={fillIn}
+                  disabled={filling}
+                  className="text-heading h-auto self-start rounded-full px-5 py-3 text-base font-bold"
+                >
+                  <SparklesIcon className="text-brand-500" />
+                  {filling ? "Reading your text…" : "Fill in from my text"}
+                </Button>
+              </div>
+              <Filled on={highlight.includes("address")} className="gap-3">
                 <FieldLabel htmlFor={`${id}-address`}>
                   Address of the {noun}
                 </FieldLabel>
@@ -335,8 +475,8 @@ export function FlatSetup({
                   pending={pending && hasAddress}
                   empty={!hasAddress}
                 />
-              </div>
-              <div className="flex flex-col gap-6">
+              </Filled>
+              <Filled on={highlight.includes("type")} className="gap-6">
                 <p id={`${id}-type`} className="text-heading">
                   What are you letting?
                 </p>
@@ -346,8 +486,8 @@ export function FlatSetup({
                   onChange={setType}
                   labelledBy={`${id}-type`}
                 />
-              </div>
-              <div className="flex flex-col gap-3">
+              </Filled>
+              <Filled on={highlight.includes("area")} className="gap-3">
                 <FieldLabel htmlFor={`${id}-area`}>
                   Living space · in square metres
                 </FieldLabel>
@@ -362,8 +502,8 @@ export function FlatSetup({
                   }
                   placeholder="79"
                 />
-              </div>
-              <div className="flex flex-col gap-3">
+              </Filled>
+              <Filled on={highlight.includes("rent")} className="gap-3">
                 <FieldLabel htmlFor={`${id}-rent`}>
                   Monthly rent · based on the warm rent
                 </FieldLabel>
@@ -379,10 +519,10 @@ export function FlatSetup({
                   placeholder="1,480"
                 />
                 <RentHint cold={cold} area={area} context={context} />
-              </div>
+              </Filled>
             </div>
 
-            <div className="flex flex-col gap-6">
+            <Filled on={highlight.includes("rooms")} className="gap-6">
               <p id={`${id}-rooms`} className="text-heading">
                 How many rooms do you have available?
               </p>
@@ -395,13 +535,13 @@ export function FlatSetup({
                 onChange={setRooms}
                 labelledBy={`${id}-rooms`}
               />
-            </div>
+            </Filled>
 
             <Divider />
 
             <div className="flex flex-col gap-8">
               <Heading>What documents must tenants have?</Heading>
-              <div className="flex flex-col gap-4">
+              <Filled on={highlight.includes("docs")} className="gap-4">
                 {DOCUMENTS.map((d) => (
                   <DocumentCheckbox
                     key={d.key}
@@ -416,7 +556,23 @@ export function FlatSetup({
                     }
                   />
                 ))}
-              </div>
+              </Filled>
+              {extras.length > 0 && (
+                <ul className="flex flex-wrap items-center gap-2">
+                  {extras.map((e) => (
+                    <li
+                      key={e}
+                      className="text-faint border-input rounded-full border border-dashed px-3 py-1.5 text-sm"
+                    >
+                      {e}
+                    </li>
+                  ))}
+                  <li className="text-faint text-sm">
+                    Noted, but not checked: applicants are reviewed only on the
+                    fields above
+                  </li>
+                </ul>
+              )}
             </div>
 
             <Divider />
